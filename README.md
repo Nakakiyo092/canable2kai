@@ -19,7 +19,7 @@ This repository contains sources for the slcan CANable 2.0 firmware. This firmwa
 - `M` and `m` - Configures CAN acceptance filter
 - `F` - Returns status flags
 
-Please find more information in the `doc` directory or the [wiki](https://github.com/Nakakiyo092/canable2-fw/wiki).
+Please find more information in the `doc` directory or the [wiki](https://github.com/Nakakiyo092/canable2kai/wiki).
 
 ## Dependencies
 
