@@ -1,47 +1,65 @@
-# CANable 2.0 Firmware
+# CANable2-Kai
 
 This repository contains sources for the slcan CANable 2.0 firmware. This firmware implements non-standard commands to support CANFD messaging (beta) alongside a LAWICEL-style command set.
 
-## Frequently Used Commands
+URL to this repository: https://github.com/Nakakiyo092/canable2kai
 
-- `O` - Opens channel
-- `C` - Closes channel
-- `sddxxyyzz` - Sets nominal bitrate and bittiming
-- `yddxxyyzz` - Sets data bitrate and bittiming
-- `tiiildd...` - Transmits a classical base data frame
-- `Tiiiiiiiildd...` - Transmits a classical extended data frame
-- `diiildd...` - Transmits a FD base data frame without bit rate switch
-- `Diiiiiiiildd...` - Transmits a FD extended data frame without bit rate switch
-- `biiildd...` - Transmits a FD base data frame with bit rate switch
-- `Biiiiiiiildd...` - Transmits a FD extended data frame with bit rate switch
-- `V` and `v` - Returns firmware version and remote path as a string
+
+## Frequently used commands
+
+- `O[CR]` - Opens the CAN channel
+- `C[CR]` - Closes the CAN channel
+- `sxxyy[CR]` - Sets custom nominal bit rate
+- `Y0[CR]` - Sets the CANFD data segment bit rate to 500k
+- `Y1[CR]` - Sets the CANFD data segment bit rate to 1M
+- `Y2[CR]` - Sets the CANFD data segment bit rate to 2M
+- `Y4[CR]` - Sets the CANFD data segment bit rate to 4M
+- `Y5[CR]` - Sets the CANFD data segment bit rate to 5M
+- `tiiildd...[CR] `- Transmits base frame
+- `Tiiiiiiiildd...[CR] `- Transmits extended frame
+- `diiildd...[CR] `- Transmits CANFD base frame (BRS disabled)
+- `Diiiiiiiildd...[CR] `- Transmits CANFD extended frames (BRS disabled)
+- `biiildd...[CR] `- Transmits CANFD base frames (BRS enabled)
+- `Biiiiiiiildd...[CR] `- Transmits CANFD extended frames (BRS enable)
+- `V[CR]` and `v[CR]` - Returns firmware version and remote path as a string
 - `Z` and `z` - Configures reporting mechanism including time stamp and Tx event
 - `M` and `m` - Configures CAN acceptance filter
-- `F` - Returns status flags
+- `F[CR]` - Returns status flags
+
+`[CR]` : `0x0D` (hex), `\r` (ascii)
 
 Please find more information in the `doc` directory or the [wiki](https://github.com/Nakakiyo092/canable2kai/wiki).
 
-## Dependencies
+
+## Toolchain
+
+The toolchain in this repository is designed to run on a Linux PC especially Ubuntu.
+
+### Dependencies
 
 On Ubuntu, the required tools can be installed with:
 
 ```bash
-sudo apt install gcc-arm-none-eabi dfu-util git
+sudo apt install git gcc-arm-none-eabi dfu-util
 ```
 
-## Building
+### How to build firmware
 
-Firmware builds with GCC. Specifically, you will need gcc-arm-none-eabi, which
-is packaged for OS X, and Linux on
-[Launchpad](https://launchpad.net/gcc-arm-embedded/+download). Download for your
-system and add the `bin` folder to your PATH.
+Simply compile by running `make`.
 
-Your Linux distribution may also have a prebuilt package for `arm-none-eabi-gcc` or `gcc-arm-none-eabi`, check your distro's repositories to see if a build exists. Simply compile by running `make`.
+### How to flash firmware
 
-## Flashing with the Bootloader
+Plug in your device in boot mode. Next, type `make flash` and your device will be updated to the latest firmware. Unplug the device and replug in normal mode, and your device will be up and running.
 
-Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, type `make flash` and your CANable will be updated to the latest firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+## Credits
 
-## License
+### Related work
 
-See LICENSE.md
+| Name | Author | License |
+|------|--------|---------|
+| [canable2-fw](https://github.com/normaldotcom/canable2-fw) | Openlight Labs | GPL-3.0 |
+
+### Bundled third-party components
+
+See LICENSE.md for the full list of bundled components and their licenses.
+
