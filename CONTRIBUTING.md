@@ -17,26 +17,52 @@ Pull requests are not expected to be accepted.
 ```
 
 
-## Subbtreess (For maintainer)
+## Subtrees (for maintainer)
+
+`doc/` and `test/` are Git subtrees of external repositories.
+
+| Directory | Repository | Sync branch |
+|-----------|------------|-------------|
+| `doc/`    | [wiki](https://github.com/Nakakiyo092/canable2kai/wiki) (`canable2kai.wiki.git`) | `master` |
+| `test/`   | [slcan-tester](https://github.com/Nakakiyo092/slcan-tester) | `merge` |
+
+Both subtrees were added without `--squash` and include the full history of the external repositories.
+Do not use `--squash` when pulling.
+
+### Setup
+
+Register the remotes once per clone:
 
 ```
 git remote add doctree https://github.com/Nakakiyo092/canable2kai.wiki.git
-git remote add testtree https://github.com/Nakakiyo092/slcan-tester
+git remote add testtree https://github.com/Nakakiyo092/slcan-tester.git
 ```
 
+The subtrees were added with the commands below.
+They are listed for reference only and do not need to be run again.
+
 ```
-git status
 git subtree add --prefix=test testtree main
 git subtree add --prefix=doc doctree master
 ```
 
-The commands below sync changes between this repository and the subtrees
-([wiki](https://github.com/Nakakiyo092/canable2kai/wiki) and [slcan-tester](https://github.com/Nakakiyo092/slcan-tester)).
+### Sync
+
 It would be a good practice to sync at release time.
+Run the commands on a clean working tree (check with `git status`).
+
+Documentation: the wiki is updated directly on `master`.
+Pull first so that edits made on the wiki web page are merged before pushing.
 
 ```
 git subtree pull --prefix=doc doctree master
 git subtree push --prefix=doc doctree master
+```
+
+Tests: slcan-tester is synced through the working branch `merge`.
+Create `merge` from `main` in slcan-tester before syncing, then merge it into `main` with a pull request.
+
+```
 git subtree pull --prefix=test testtree merge
 git subtree push --prefix=test testtree merge
 ```
