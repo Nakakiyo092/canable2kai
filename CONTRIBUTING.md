@@ -1,7 +1,6 @@
 # Contributing
 
-Issues, discussions, and forks may be created at the contributor’s discretion.
-Pull requests are not expected to be accepted.
+Issues, discussions, pull requests, and forks may be created at the contributor’s discretion.
 
 
 ## Repository structure
