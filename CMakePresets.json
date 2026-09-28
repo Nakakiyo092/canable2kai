@@ -1,0 +1,27 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "canable2",
+            "displayName": "CANable 2.0 (L2, STM32G431)",
+            "inherits": "base",
+            "cacheVariables": { "BOARD": "canable2" }
+        }
+    ],
+
+    "buildPresets": [
+        { "name": "canable2", "configurePreset": "canable2" }
+    ]
+}

@@ -12,8 +12,18 @@ Issues, discussions, pull requests, and forks may be created at the contributor�
 │   └── canable2kai.wiki    # Git subtree (external wiki repo)
 ├── test/                   # Test scripts for system test
 │   └── slcan-tester        # Git subtree (external repo)
-└── canable2kai-fw/         # Firmware source code
+├── cmake/                  # CMake toolchain and helper scripts
+├── inc/                    # Firmware headers
+├── src/                    # Firmware sources
+├── ldscripts/              # Linker scripts
+├── lib/                    # Vendored libraries (see UPSTREAM.md in each)
+├── CMakeLists.txt
+└── CMakePresets.json       # Board presets (cmake --list-presets)
 ```
+
+Vendored libraries under `lib/` keep a fixed path per library (`lib/<name>/`).
+The upstream source, version, license, and local modifications are recorded in `lib/<name>/UPSTREAM.md`.
+To update a library, overwrite its directory in place so that the diff shows the upstream changes, and update `UPSTREAM.md`.
 
 
 ## Subtrees (for maintainer)
