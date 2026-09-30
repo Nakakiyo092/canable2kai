@@ -16,14 +16,14 @@ Issues, discussions, pull requests, and forks may be created at the contributor�
 ├── inc/                    # Firmware headers
 ├── src/                    # Firmware sources
 ├── ldscripts/              # Linker scripts
-├── lib/                    # Vendored libraries (see UPSTREAM.md in each)
+├── lib/                    # Vendored libraries (see lib/README.md)
 ├── CMakeLists.txt
 └── CMakePresets.json       # Board presets (cmake --list-presets)
 ```
 
 Vendored libraries under `lib/` keep a fixed path per library (`lib/<name>/`).
-The upstream source, version, license, and local modifications are recorded in `lib/<name>/UPSTREAM.md`.
-To update a library, overwrite its directory in place so that the diff shows the upstream changes, and update `UPSTREAM.md`.
+The upstream source, version, license, and local modifications are recorded in `lib/README.md`.
+To update a library, overwrite its directory in place so that the diff shows the upstream changes, and update `lib/README.md`.
 
 
 ## Subtrees (for maintainer)
