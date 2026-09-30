@@ -23,24 +23,42 @@ Please find more information in the `doc` directory or the [wiki](https://github
 
 ## Dependencies
 
-On Ubuntu, the required tools can be installed with:
+- GNU Arm Embedded Toolchain (`arm-none-eabi-gcc`)
+- CMake 3.25 or later
+- Ninja
+- dfu-util (for flashing)
+- git
+
+The toolchain binaries must be in your PATH. On Ubuntu, the required tools can be installed with:
 
 ```bash
-sudo apt install gcc-arm-none-eabi dfu-util git
+sudo apt install gcc-arm-none-eabi cmake ninja-build dfu-util git
 ```
 
 ## Building
 
-Firmware builds with GCC. Specifically, you will need gcc-arm-none-eabi, which
-is packaged for OS X, and Linux on
-[Launchpad](https://launchpad.net/gcc-arm-embedded/+download). Download for your
-system and add the `bin` folder to your PATH.
+The build uses CMake presets. `cmake --list-presets` shows the available boards.
 
-Your Linux distribution may also have a prebuilt package for `arm-none-eabi-gcc` or `gcc-arm-none-eabi`, check your distro's repositories to see if a build exists. Simply compile by running `make`.
+```bash
+cmake --preset canable2
+cmake --build --preset canable2
+```
+
+The firmware is written to `build/canable2/` (`canable2.elf`, `canable2.bin`, `canable2.hex`, `canable2.map`).
+
+The former Makefile has been removed. The commands map as follows:
+
+| Former command | Command |
+|----------------|---------|
+| `make`         | `cmake --preset canable2` (first time only), then `cmake --build --preset canable2` |
+| `make flash`   | `cmake --build --preset canable2 --target upload` |
+| `make clean`   | `cmake --build --preset canable2 --target clean` |
 
 ## Flashing with the Bootloader
 
-Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, type `make flash` and your CANable will be updated to the latest firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, run `cmake --build --preset canable2 --target upload` and your CANable will be updated to the firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+
+On Linux, dfu-util needs permission to access the device (a udev rule, or running the command with `sudo`).
 
 ## License
 
