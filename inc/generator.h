@@ -18,7 +18,7 @@
 #ifndef USB2CANFDV1_GENERATOR_H
 #define USB2CANFDV1_GENERATOR_H
 
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 
 // Filter mode
 enum SlcanFilterMode

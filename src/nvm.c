@@ -17,7 +17,7 @@
 
 // Read and write to non-volatile memory.
 
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "can.h"
 #include "nvm.h"
 #include "generator.h"
@@ -29,9 +29,9 @@ enum NvmMemoryStatus
     NVM_MEMORY_CLEARED = 0xF    /* Flash memory store 0xFF when cleared */
 };
 
-#define NVM_PAGE_NUMBER_DATA      62U                           /* Page number of data area (see RM0444-3.3.1) */
+#define NVM_PAGE_NUMBER_DATA      63U                           /* Page number of data area (see RM0440-5.3.1) */
 #define NVM_ERASE_OK              0xFFFFFFFFU
-#define NVM_ADDR_ORIGIN           0x0801F000U                   /* Start address of data area in flash */
+#define NVM_ADDR_ORIGIN           0x0801F800U                   /* Start address of data area in flash */
 #define NVM_ADDR_SERIAL_NUMBER    (NVM_ADDR_ORIGIN + 0x000UL)
 #define NVM_ADDR_STP_CONFIG       (NVM_ADDR_ORIGIN + 0x008UL)   /* Auto startup configuration */
 #define NVM_ADDR_STP_NOM_BITRATE  (NVM_ADDR_ORIGIN + 0x010UL)   /* Nominal bitrate at STartuP */

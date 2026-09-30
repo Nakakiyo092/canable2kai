@@ -19,18 +19,14 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "buffer.h"
 #include "can.h"
 #include "led.h"
 #include "nvm.h"
 #include "parser.h"
-#ifdef DEBUG
-#include "bootloader.h"
-#endif
-
-#define SLCAN_VERSION       "VW1K6"
-#define SLCAN_SW_VERSION    "2.3.0"
+#define SLCAN_VERSION       "VL2K6"
+#define SLCAN_SW_VERSION    GIT_VERSION
 #define SLCAN_RET_OK    ((uint8_t*)"\r")
 #define SLCAN_RET_ERR   ((uint8_t*)"\a")
 #define SLCAN_RET_LEN   1U
@@ -41,9 +37,9 @@ static char *hw_sw_ver = SLCAN_VERSION "\r";
 #else
 static char *hw_sw_ver = SLCAN_VERSION "-DEBUG\r";
 #endif
-static char *hw_sw_ver_detail = "v: hardware=\"USB2CANFDV1\", software=\"" SLCAN_SW_VERSION "\", url=\"" "github.com/Nakakiyo092/usb2canfdv1" "\"\r";
+static char *hw_sw_ver_detail = "v: hardware=\"CANable2.0\", software=\"" SLCAN_SW_VERSION "\", url=\"" "github.com/Nakakiyo092/canable2kai" "\"\r";
 static char *can_info = "I3050\r";
-static char *can_info_detail = "i: protocol=\"ISO-CANFD\", clock_mhz=80, controller=\"STM32G0B1CB\"\r";
+static char *can_info_detail = "i: protocol=\"ISO-CANFD\", clock_mhz=80, controller=\"STM32G431CB\"\r";
 
 // Private methods
 static HAL_StatusTypeDef psr_convert_str_to_number(uint8_t *buf, uint8_t len);
@@ -1107,23 +1103,9 @@ static void psr_parse_str_ext_tdc(uint8_t *buf, uint8_t len)
 }
 
 // Parse extended command (! family). Currently dispatches:
-//   !B007        -- enter bootloader update mode (existing).
 //   !7DC[...]    -- Tx delay compensation override (see psr_parse_str_ext_tdc).
 void psr_parse_str_extended(uint8_t *buf, uint8_t len)
 {
-    // !B007 -- enter update mode.
-    if (len == 5 && buf[1] == 0xB && buf[2] == 0x0 && buf[3] == 0x0 && buf[4] == 0x7)
-    {
-        if (can_get_bus_state() != BUS_CLOSED)
-        {
-            buf_enqueue_cdc(SLCAN_RET_ERR, SLCAN_RET_LEN);
-            return;
-        }
-        buf_enqueue_cdc(SLCAN_RET_OK, SLCAN_RET_LEN);
-        bootloader_enter_update_mode();
-        return;
-    }
-
     // !7DC[...] -- TDC override family.
     if (len >= 4 && buf[1] == 0x7 && buf[2] == 0xD && buf[3] == 0xC)
     {

@@ -17,7 +17,7 @@
 
 // Handles blinking of rx and tx status lights
 
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "led.h"
 #include "generator.h"
 

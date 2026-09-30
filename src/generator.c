@@ -17,7 +17,7 @@
 
 // Generate outgoing slcan messages.
 
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "can.h"
 #include "generator.h"
 

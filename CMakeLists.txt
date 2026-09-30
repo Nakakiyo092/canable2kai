@@ -32,24 +32,23 @@ include(cmake/upload.cmake)
 
 find_program(ARM_SIZE arm-none-eabi-size REQUIRED)
 
-# Sources are listed in the same order as the former Makefile, since the
-# object order determines the memory layout.
 add_executable(${FW_NAME}
     src/main.c
     src/system_stm32g4xx.c
-    src/system.c
+    src/gpio.c
+    src/fdcan.c
+    src/tim.c
+    src/interrupts.c
     src/usbd_conf.c
     src/usbd_cdc_if.c
     src/usb_device.c
     src/usbd_desc.c
-    src/interrupts.c
+    src/buffer.c
     src/can.c
-    src/error.c
+    src/generator.c
     src/led.c
     src/nvm.c
-    src/slcan.c
-    src/printf.c
-    src/buffer.c
+    src/parser.c
     src/startup_stm32g431xx.s
     ${USB_DIR}/Core/Src/usbd_ctlreq.c
     ${USB_DIR}/Core/Src/usbd_ioreq.c

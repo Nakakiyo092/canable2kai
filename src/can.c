@@ -17,7 +17,7 @@
 
 // Initializes and provides methods to interact with the FDCAN peripheral
 
-#include "stm32g0xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "usbd_cdc_if.h"
 #include "fdcan.h"
 #include "buffer.h"

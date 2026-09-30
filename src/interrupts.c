@@ -6,6 +6,7 @@
 #include "interrupts.h"
 #include "can.h"
 #include "led.h"
+#include "tim.h"
 
 // Externs
 extern PCD_HandleTypeDef hpcd_USB_FS;
@@ -62,6 +63,12 @@ void USB_LP_IRQHandler(void)
 void USB_HP_IRQHandler(void)
 {
   HAL_PCD_IRQHandler(&hpcd_USB_FS);
+}
+
+// Handle TIM3 interrupt (timestamp base)
+void TIM3_IRQHandler(void)
+{
+  HAL_TIM_IRQHandler(&htim3);
 }
 
 // Handle SysTick interrupt
