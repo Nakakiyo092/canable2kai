@@ -1,8 +1,27 @@
-#ifndef _CAN_H
-#define _CAN_H
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
+
+#ifndef USB2CANFDV1_CAN_H
+#define USB2CANFDV1_CAN_H
+
+#include "stm32g0xx_hal.h"
 
 // Classic CAN / CANFD nominal bitrates
-enum can_bitrate
+enum CanBitrateNominal
 {
     CAN_BITRATE_10K = 0,
     CAN_BITRATE_20K,
@@ -13,44 +32,61 @@ enum can_bitrate
     CAN_BITRATE_500K,
     CAN_BITRATE_800K,
     CAN_BITRATE_1000K,
-    CAN_BITRATE_83K,
-    CAN_BITRATE_666K,
 
     CAN_BITRATE_INVALID,
 };
 
 // CANFD data bitrates
-enum can_data_bitrate
+enum CanBitrateData
 {
     CAN_DATA_BITRATE_500K = 0,
     CAN_DATA_BITRATE_1M = 1,
     CAN_DATA_BITRATE_2M = 2,
+    // value 3 (3 Mbps) is not supported: exactly 3 Mbps cannot be achieved with this clock setup
     CAN_DATA_BITRATE_4M = 4,
     CAN_DATA_BITRATE_5M = 5,
-    CAN_DATA_BITRATE_8M = 8,
 
     CAN_DATA_BITRATE_INVALID,
 };
 
 // Bus state
-enum can_bus_state
+enum CanBusState
 {
     BUS_CLOSED,
     BUS_OPENED
 };
 
-// Structure for CAN bus error state
-struct can_error_state
+#ifdef DEBUG
+// Tx delay compensation mode (debug-only override of the AUTO default).
+enum CanTdcMode
 {
-    uint8_t bus_off;
-    uint8_t err_pssv;
-    uint8_t tec;
-    uint8_t rec;
-    uint32_t last_err_code;
+    CAN_TDC_AUTO,       // Default: compute TDCO from bit timing; disable above prescaler 2
+    CAN_TDC_DISABLED,   // Force TDC off regardless of bit timing
+    CAN_TDC_MANUAL      // Use stored TDCO/TDCF
+};
+
+// Snapshot of live TDC values read from the FDCAN peripheral.
+struct CanTdcLiveState
+{
+    uint8_t tdcv;       // Measured Tx delay (FDCAN_PSR.TDCV), updated each FD tx
+    uint8_t tdco;       // Configured offset (FDCAN_TDCR.TDCO)
+    uint8_t tdcf;       // Configured filter (FDCAN_TDCR.TDCF)
+    uint8_t enabled;    // FDCAN_DBTP.TDC bit
+};
+#endif
+
+// Structure for CAN protocol status and error counters
+struct CanErrorState
+{
+    uint8_t bus_off;        // Copy of BusOff in FDCAN_ProtocolStatus
+    uint8_t err_pssv;       // Copy of ErrorPassive in FDCAN_ProtocolStatus
+    uint8_t tx_err_cnt;     // Copy of TxErrorCnt in FDCAN_ErrorCounters
+    uint8_t rx_err_cnt;     // Copy of RxErrorCnt in FDCAN_ErrorCounters (rx err active) / 128 (rx err passive)
+    uint32_t last_err_code; // Copy of LastErrorCode or DataLastErrorCode in FDCAN_ProtocolStatus
 };
 
 // Structure for CAN/FD bitrate configuration
-struct can_bitrate_cfg
+struct CanBitrateCfg
 {
     uint16_t prescaler;
     uint8_t time_seg1;
@@ -58,8 +94,15 @@ struct can_bitrate_cfg
     uint8_t sjw;
 };
 
+#define CAN_STD_DLC_TO_HAL_DLC(val)   ((uint32_t)(val) * FDCAN_DLC_BYTES_1)
+#define CAN_HAL_DLC_TO_STD_DLC(val)   ((uint8_t)(((val) / FDCAN_DLC_BYTES_1) & 0xF))
+
 // CANFD parameter
-#define CAN_MAX_DATALEN                 64  // CAN maximum data length. Must be 64 for canfd.
+#define CAN_MAX_DATALEN                 64U // CAN maximum data length. Must be 64 for canfd.
+
+// Public variable
+#define CAN_DLC_TO_BYTES_SIZE           16U // Number of entries in can_dlc_to_bytes (DLC 0x0..0xF)
+extern uint8_t can_dlc_to_bytes[];
 
 // Prototypes
 void can_init(void);
@@ -68,16 +111,16 @@ HAL_StatusTypeDef can_disable(void);
 void can_process(void);
 
 // Bit rate functions
-HAL_StatusTypeDef can_set_bitrate(enum can_bitrate bitrate);
-HAL_StatusTypeDef can_set_data_bitrate(enum can_data_bitrate bitrate);
-HAL_StatusTypeDef can_set_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg);
-HAL_StatusTypeDef can_set_data_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg);
-struct can_bitrate_cfg can_get_bitrate_cfg(void);
-struct can_bitrate_cfg can_get_data_bitrate_cfg(void);
+HAL_StatusTypeDef can_set_nominal_bitrate(enum CanBitrateNominal bitrate);
+HAL_StatusTypeDef can_set_data_bitrate(enum CanBitrateData bitrate);
+HAL_StatusTypeDef can_set_nominal_bitrate_cfg(struct CanBitrateCfg bitrate_cfg);
+HAL_StatusTypeDef can_set_data_bitrate_cfg(struct CanBitrateCfg bitrate_cfg);
+struct CanBitrateCfg can_get_nominal_bitrate_cfg(void);
+struct CanBitrateCfg can_get_data_bitrate_cfg(void);
 
 // Filter functions
-HAL_StatusTypeDef can_set_filter_std(FunctionalState state, uint32_t code, uint32_t mask);
-HAL_StatusTypeDef can_set_filter_ext(FunctionalState state, uint32_t code, uint32_t mask);
+HAL_StatusTypeDef can_set_filter1_std(FunctionalState state, uint32_t code, uint32_t mask);
+HAL_StatusTypeDef can_set_filter1_ext(FunctionalState state, uint32_t code, uint32_t mask);
 FunctionalState can_is_filter_std_enabled(void);
 FunctionalState can_is_filter_ext_enabled(void);
 uint32_t can_get_filter_std_code(void);
@@ -85,11 +128,16 @@ uint32_t can_get_filter_std_mask(void);
 uint32_t can_get_filter_ext_code(void);
 uint32_t can_get_filter_ext_mask(void);
 
+// Second filter slot functions (FilterIndex=1)
+// state=ENABLE: acceptance filter routed to FIFO0; state=DISABLE: resets to pass-all drain (FIFO1)
+HAL_StatusTypeDef can_set_filter2_std(FunctionalState state, uint32_t code, uint32_t mask);
+HAL_StatusTypeDef can_set_filter2_ext(FunctionalState state, uint32_t code, uint32_t mask);
+
 // CAN mode and status
 HAL_StatusTypeDef can_set_mode(uint32_t mode);
 HAL_StatusTypeDef can_set_auto_retransmit(FunctionalState state);
-enum can_bus_state can_get_bus_state(void);
-struct can_error_state can_get_error_state(void);
+enum CanBusState can_get_bus_state(void);
+struct CanErrorState can_get_error_state(void);
 FunctionalState can_is_tx_enabled(void);
 uint32_t can_get_bus_load_ppm(void);
 
@@ -100,4 +148,13 @@ uint32_t can_get_cycle_max_time_ns(void);
 
 FDCAN_HandleTypeDef *can_get_handle(void);
 
-#endif // _CAN_H
+#ifdef DEBUG
+// Tx delay compensation override (debug-only).
+// Setters require BUS_CLOSED; they apply to the next can_enable() only.
+HAL_StatusTypeDef can_set_tdc_auto(void);
+HAL_StatusTypeDef can_set_tdc_disabled(void);
+HAL_StatusTypeDef can_set_tdc_manual(uint8_t tdco, uint8_t tdcf);
+struct CanTdcLiveState can_get_tdc_state(void);
+#endif
+
+#endif // USB2CANFDV1_CAN_H

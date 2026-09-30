@@ -15,15 +15,12 @@
 // See also: LICENSE.md in the root of this repository
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifndef USB2CANFDV1_NVM_H
-#define USB2CANFDV1_NVM_H
+#ifndef USB2CANFDV1_PARSER_H
+#define USB2CANFDV1_PARSER_H
+
+#include "generator.h"
 
 // Prototypes
-void nvm_init(void);
-HAL_StatusTypeDef nvm_get_serial_number(uint16_t *num);
-HAL_StatusTypeDef nvm_update_serial_number(uint16_t num);
+void psr_parse_str(uint8_t *buf, uint8_t len);
 
-HAL_StatusTypeDef nvm_apply_startup_cfg(void);
-HAL_StatusTypeDef nvm_update_startup_cfg(uint8_t mode);
-
-#endif // USB2CANFDV1_NVM_H
+#endif // USB2CANFDV1_PARSER_H

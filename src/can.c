@@ -1,76 +1,84 @@
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
 //
-// can: initializes and provides methods to interact with the CAN peripheral
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
 
-#include "stm32g4xx_hal.h"
+// Initializes and provides methods to interact with the FDCAN peripheral
+
+#include "stm32g0xx_hal.h"
 #include "usbd_cdc_if.h"
+#include "fdcan.h"
 #include "buffer.h"
 #include "can.h"
-#include "error.h"
 #include "led.h"
-#include "slcan.h"
-#include "system.h"
+#include "generator.h"
 
-// Bit number for each frame type with zero data length
-#define CAN_BIT_NBR_WOD_CBFF            47
-#define CAN_BIT_NBR_WOD_CEFF            67
-#define CAN_BIT_NBR_WOD_FBFF_ARBIT      30
-#define CAN_BIT_NBR_WOD_FEFF_ARBIT      49
-#define CAN_BIT_NBR_WOD_FXFF_DATA_S     26
-#define CAN_BIT_NBR_WOD_FXFF_DATA_L     30
+// Bit number for each frame type WithOut Data bytes (from SOF to ITM)
+#define CAN_BIT_NBR_WOD_CBFF            47U
+#define CAN_BIT_NBR_WOD_CEFF            67U
+#define CAN_BIT_NBR_WOD_FBFF_ARBIT      30U         // Bit number in arbitration phase
+#define CAN_BIT_NBR_WOD_FEFF_ARBIT      49U
+#define CAN_BIT_NBR_WOD_FXFF_DATA_S     (26 + 5)    // Bit number in data phase with shorter crc (Including fixed stuff bits in CRC field)
+#define CAN_BIT_NBR_WOD_FXFF_DATA_L     (30 + 6)    // Bit number in data phase with longer crc (Including fixed stuff bits in CRC field)
 
 // Parameter to calculate bus load
-#define CAN_TIME_CNT_MAX_REWIND         360         /* Max cycle ~120ms X 3 times margin. should be < MIN_BIT_NBR * 9 */
-#define CAN_BUS_LOAD_BUILDUP_PPM        1125000     /* Compensate stuff bits and round down in laod calc */
+#define CAN_ROOT_CLOCK_MHZ              80U
+#define CAN_BUS_LOAD_CYCLE_MS           100U
+
+// Maximum data bit rate prescaler for which Tx delay compensation is available.
+// Per Bosch M_CAN User's Manual v3.3.1 (p.8), when TDC = '1' the DBTP.DBRP field
+// range is limited to 0 or 1, i.e. an actual data prescaler of 1 or 2.
+#define CAN_TDC_MAX_DATA_PRESCALER      2U
+
+// Public variable
+uint8_t can_dlc_to_bytes[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
 
 // Private variables
-static FDCAN_HandleTypeDef can_handle;
 static FDCAN_FilterTypeDef can_std_filter;
 static FDCAN_FilterTypeDef can_ext_filter;
 static FDCAN_FilterTypeDef can_std_pass_all;
 static FDCAN_FilterTypeDef can_ext_pass_all;
-static enum can_bus_state can_bus_state;
-static struct can_error_state can_error_state = {0};
+static enum CanBusState can_bus_state;
+static struct CanErrorState can_error_state = {0};
 static uint32_t can_mode = FDCAN_MODE_NORMAL;
 static FunctionalState can_auto_retransmit = ENABLE;
-static struct can_bitrate_cfg can_bitrate_nominal, can_bitrate_data = {0};
+static struct CanBitrateCfg can_bit_cfg_nominal = {0};
+static struct CanBitrateCfg can_bit_cfg_data = {0};
 
 static uint32_t can_cycle_max_time_ns = 0;
 static uint32_t can_cycle_ave_time_ns = 0;
-static uint32_t can_bit_time_ns = 0;
-static uint32_t can_bus_load_ppm = 0;
+static uint32_t can_bit_time_ns = 0;            // Time for one bit in ns
+static uint32_t can_bus_load_ppm = 0;           // Current bus load in ppm
+
+#ifdef DEBUG
+// Tx delay compensation override state. Default is AUTO (matches the
+// non-debug build). Setters change these; can_enable() consults them and
+// then resets the mode to AUTO, so an override applies to the next open only.
+static enum CanTdcMode can_tdc_mode = CAN_TDC_AUTO;
+static uint8_t can_tdc_manual_tdco = 0;
+static uint8_t can_tdc_manual_tdcf = 0;
+#endif
 
 // Private methods
 static void can_update_bit_time_ns(void);
 static uint16_t can_get_bit_number_in_rx_frame(FDCAN_RxHeaderTypeDef *pRxHeader);
-static uint16_t can_get_bit_number_in_tx_event(FDCAN_TxEventFifoTypeDef *pRxHeader);
+static uint16_t can_get_bit_number_in_tx_event(FDCAN_TxEventFifoTypeDef *pTxEvent);
 
 // Initialize CAN peripheral settings, but don't actually start the peripheral
 void can_init(void)
 {
-    // Initialize GPIO for CAN transceiver
-    GPIO_InitTypeDef GPIO_InitStruct;
-    __HAL_RCC_FDCAN_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-
-    GPIO_InitStruct.Pin = GPIO_PIN_13;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 1); // CAN IO power
-
-    // PB8     ------> CAN_RX
-    // PB9     ------> CAN_TX
-    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
     // Initialize default CAN filter configuration
     can_std_filter.IdType = FDCAN_STANDARD_ID;
     can_std_filter.FilterIndex = 0;
@@ -100,17 +108,14 @@ void can_init(void)
     can_ext_pass_all.FilterID1 = 0x1FFFFFFF;
     can_ext_pass_all.FilterID2 = 0x00000000;
 
-    // Reset the queue
-    //memset(&can_tx_queue, 0, sizeof(can_tx_queue));
-
     // default to 125 kbit/s & 2Mbit/s
-    can_set_bitrate(CAN_BITRATE_125K);
+    can_set_nominal_bitrate(CAN_BITRATE_125K);
     can_set_data_bitrate(CAN_DATA_BITRATE_2M);
-    can_handle.Instance = FDCAN1;
+    hfdcan1.Instance = FDCAN1;
     can_bus_state = BUS_CLOSED;
 }
 
-// Start the CAN peripheral
+// Start the CAN peripheral and open the channel
 HAL_StatusTypeDef can_enable(void)
 {
     if (can_bus_state == BUS_CLOSED)
@@ -118,66 +123,92 @@ HAL_StatusTypeDef can_enable(void)
         // Reset error counter etc.
         __HAL_RCC_FDCAN_FORCE_RESET();
         __HAL_RCC_FDCAN_RELEASE_RESET();
+        can_error_state = (struct CanErrorState){0};
+        can_error_state.last_err_code = FDCAN_PROTOCOL_ERROR_NONE;
 
-        can_handle.Init.ClockDivider = FDCAN_CLOCK_DIV1;
-        can_handle.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
+        hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
+        hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
 
-        can_handle.Init.Mode = can_mode;
-        can_handle.Init.AutoRetransmission = can_auto_retransmit;
-        can_handle.Init.TransmitPause = DISABLE;
-        can_handle.Init.ProtocolException = ENABLE;
+        hfdcan1.Init.Mode = can_mode;
+        hfdcan1.Init.AutoRetransmission = can_auto_retransmit;
+        hfdcan1.Init.TransmitPause = DISABLE;
+        hfdcan1.Init.ProtocolException = ENABLE;
 
-        can_handle.Init.NominalPrescaler = can_bitrate_nominal.prescaler;
-        can_handle.Init.NominalSyncJumpWidth = can_bitrate_nominal.sjw;
-        can_handle.Init.NominalTimeSeg1 = can_bitrate_nominal.time_seg1;
-        can_handle.Init.NominalTimeSeg2 = can_bitrate_nominal.time_seg2;
+        hfdcan1.Init.NominalPrescaler = can_bit_cfg_nominal.prescaler;
+        hfdcan1.Init.NominalSyncJumpWidth = can_bit_cfg_nominal.sjw;
+        hfdcan1.Init.NominalTimeSeg1 = can_bit_cfg_nominal.time_seg1;
+        hfdcan1.Init.NominalTimeSeg2 = can_bit_cfg_nominal.time_seg2;
 
         // FD only
-        can_handle.Init.DataPrescaler = can_bitrate_data.prescaler;
-        can_handle.Init.DataSyncJumpWidth = can_bitrate_data.sjw;
-        can_handle.Init.DataTimeSeg1 = can_bitrate_data.time_seg1;
-        can_handle.Init.DataTimeSeg2 = can_bitrate_data.time_seg2;
+        hfdcan1.Init.DataPrescaler = can_bit_cfg_data.prescaler;
+        hfdcan1.Init.DataSyncJumpWidth = can_bit_cfg_data.sjw;
+        hfdcan1.Init.DataTimeSeg1 = can_bit_cfg_data.time_seg1;
+        hfdcan1.Init.DataTimeSeg2 = can_bit_cfg_data.time_seg2;
 
-        can_handle.Init.StdFiltersNbr = 2;
-        can_handle.Init.ExtFiltersNbr = 2;
-        can_handle.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
+        hfdcan1.Init.StdFiltersNbr = 2;
+        hfdcan1.Init.ExtFiltersNbr = 2;
+        hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
 
-        if (HAL_FDCAN_Init(&can_handle) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK) return HAL_ERROR;
 
-        // This is a must for high data bit rates, especially for isolated transceivers
-        uint32_t offset = can_handle.Init.DataPrescaler * can_handle.Init.DataTimeSeg1;
-        if (offset <= 0x50)
+        // Setup Tx delay compensation.
+        // Default (AUTO): turn on whenever the data prescaler allows it (1 or 2), off otherwise.
+        // The debug-only !7DC command can override this to DISABLED or MANUAL for the next open only.
+#ifdef DEBUG
+        if (can_tdc_mode == CAN_TDC_DISABLED)
         {
-            if (HAL_FDCAN_ConfigTxDelayCompensation(&can_handle, offset, 0) != HAL_OK) return HAL_ERROR;
-            if (HAL_FDCAN_EnableTxDelayCompensation(&can_handle) != HAL_OK) return HAL_ERROR;
+            if (HAL_FDCAN_DisableTxDelayCompensation(&hfdcan1) != HAL_OK) return HAL_ERROR;
+            can_tdc_mode = CAN_TDC_AUTO;
+        }
+        else if (can_tdc_mode == CAN_TDC_MANUAL)
+        {
+            if (HAL_FDCAN_ConfigTxDelayCompensation(&hfdcan1, can_tdc_manual_tdco, can_tdc_manual_tdcf) != HAL_OK) return HAL_ERROR;
+            if (HAL_FDCAN_EnableTxDelayCompensation(&hfdcan1) != HAL_OK) return HAL_ERROR;
+            can_tdc_mode = CAN_TDC_AUTO;
         }
         else
+#endif
         {
-            // The offset value 0x50 corresponds to bitrate 1Mbps @ 50% sampling point or 2Mbps @ 100% sampling point.
-            // Turn off at 1Mbps and Turn on at 2Mbps
-            HAL_FDCAN_DisableTxDelayCompensation(&can_handle);
+            // TDC AUTO MODE
+            // TDC is available only for a data prescaler of 1 or 2 (M_CAN v3.3.1 p.8),
+            // so enable it whenever the prescaler allows and leave it off otherwise.
+            if (can_bit_cfg_data.prescaler <= CAN_TDC_MAX_DATA_PRESCALER)
+            {
+                // Follow the recommended values in the link.
+                // https://github.com/stm32-hotspot/CKB-STM32-FDCAN-8Mbs/blob/8a22560/NUCLEO-G0B1/Core/Src/main.c#L139-L141
+                // With a prescaler of 1 or 2 the offset never exceeds 2 * 32 = 64,
+                // which is below the TDCO field maximum 0x7F (127), so no upper clamp is required.
+                uint32_t offset = can_bit_cfg_data.prescaler * can_bit_cfg_data.time_seg1;
+                if (HAL_FDCAN_ConfigTxDelayCompensation(&hfdcan1, offset, 0) != HAL_OK) return HAL_ERROR;
+                if (HAL_FDCAN_EnableTxDelayCompensation(&hfdcan1) != HAL_OK) return HAL_ERROR;
+            }
+            else
+            {
+                // A data prescaler above 2 only occurs at low data bit rates, where the
+                // transceiver loop delay is negligible compared to the bit time so TDC is
+                // not needed. It is unsupported by the hardware, so leave it disabled.
+                if (HAL_FDCAN_DisableTxDelayCompensation(&hfdcan1) != HAL_OK) return HAL_ERROR;
+            }
         }
 
-        if (HAL_FDCAN_ConfigFilter(&can_handle, &can_std_filter) != HAL_OK) return HAL_ERROR;
-        if (HAL_FDCAN_ConfigFilter(&can_handle, &can_ext_filter) != HAL_OK) return HAL_ERROR;
-        if (HAL_FDCAN_ConfigFilter(&can_handle, &can_std_pass_all) != HAL_OK) return HAL_ERROR;
-        if (HAL_FDCAN_ConfigFilter(&can_handle, &can_ext_pass_all) != HAL_OK) return HAL_ERROR;
-        HAL_FDCAN_ConfigGlobalFilter(&can_handle, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE);
+        if (HAL_FDCAN_ConfigFilter(&hfdcan1, &can_std_filter) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_ConfigFilter(&hfdcan1, &can_ext_filter) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_ConfigFilter(&hfdcan1, &can_std_pass_all) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_ConfigFilter(&hfdcan1, &can_ext_pass_all) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK) return HAL_ERROR;
 
-        HAL_FDCAN_ConfigTimestampCounter(&can_handle, FDCAN_TIMESTAMP_PRESC_1);
-        // Internal does not work to get time. External use TIM3 as source. See RM0440.
-        HAL_FDCAN_EnableTimestampCounter(&can_handle, FDCAN_TIMESTAMP_EXTERNAL);
+        if (HAL_FDCAN_ConfigTimestampCounter(&hfdcan1, FDCAN_TIMESTAMP_PRESC_1) != HAL_OK) return HAL_ERROR;
+        // Internal does not work to get time (counts arb. bits + data bits). External use TIM3 as source. See RM0444.
+        if (HAL_FDCAN_EnableTimestampCounter(&hfdcan1, FDCAN_TIMESTAMP_EXTERNAL) != HAL_OK) return HAL_ERROR;
 
-        if (HAL_FDCAN_Start(&can_handle) != HAL_OK) return HAL_ERROR;
+        if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) return HAL_ERROR;
 
         buf_clear_can_buffer();
 
         can_update_bit_time_ns();
-        can_clear_cycle_time();
         can_bus_load_ppm = 0;
-        can_error_state.last_err_code = FDCAN_PROTOCOL_ERROR_NONE;
 
-        led_turn_green(LED_OFF);
+        led_turn_txd(LED_OFF);
 
         can_bus_state = BUS_OPENED;
 
@@ -186,25 +217,24 @@ HAL_StatusTypeDef can_enable(void)
     return HAL_ERROR;
 }
 
-// Disable the CAN peripheral and go off-bus
+// Disable the CAN peripheral and close the channel
 HAL_StatusTypeDef can_disable(void)
 {
     if (can_bus_state == BUS_OPENED)
     {
-        HAL_FDCAN_Stop(&can_handle);
-        HAL_FDCAN_DeInit(&can_handle);
+        HAL_StatusTypeDef ret = HAL_OK;
+        if (HAL_FDCAN_Stop(&hfdcan1) != HAL_OK) ret = HAL_ERROR;
+        if (HAL_FDCAN_DeInit(&hfdcan1) != HAL_OK) ret = HAL_ERROR;
 
         // Reset error counter etc.
         __HAL_RCC_FDCAN_FORCE_RESET();
         __HAL_RCC_FDCAN_RELEASE_RESET();
 
-        buf_clear_can_buffer();
-
-        led_turn_green(LED_ON);
+        led_turn_txd(LED_ON);
 
         can_bus_state = BUS_CLOSED;
 
-        return HAL_OK;
+        return ret;
     }
     return HAL_ERROR;
 }
@@ -212,126 +242,177 @@ HAL_StatusTypeDef can_disable(void)
 // Process data from CAN tx/rx circular buffers
 void can_process(void)
 {
-    static uint16_t last_frame_time_cnt = 0;
     static uint32_t bit_cnt_message = 0;
     FDCAN_TxEventFifoTypeDef tx_event;
     FDCAN_RxHeaderTypeDef rx_msg_header;
     uint8_t rx_msg_data[64] = {0};
 
-    // If message transmitted on bus, parse the frame
-    if (HAL_FDCAN_GetTxEvent(&can_handle, &tx_event) == HAL_OK)
+    // If a message has been transmitted on bus, parse the frame
+    if (HAL_FDCAN_GetTxEvent(&hfdcan1, &tx_event) == HAL_OK)
     {
-        int32_t len = slcan_parse_tx_event(buf_get_cdc_dest(), &tx_event, buf_dequeue_can_tx_data());
-        buf_comit_cdc_dest(len);
+        uint8_t *data = buf_get_can_sent_data(tx_event.MessageMarker);
+        if (data != NULL)
+        {
+            uint16_t len = gen_generate_tx_event(buf_reserve_cdc_dest(SLCAN_MTU), &tx_event, data);
+            buf_commit_cdc_dest(len);
+            buf_release_can_until(tx_event.MessageMarker);
+        }
+        else
+        {
+            gen_raise_error(SLCAN_STS_DATA_OVERRUN);
+        }
 
-        if (tx_event.TxTimestamp != last_frame_time_cnt)    // Don't count same frame.
+        // Don't count the loop back frame in internal or external loop back mode.
+        // They are counted in the Rx frame processing.
+        if (can_mode != FDCAN_MODE_INTERNAL_LOOPBACK && can_mode != FDCAN_MODE_EXTERNAL_LOOPBACK)
         {
             bit_cnt_message += can_get_bit_number_in_tx_event(&tx_event);
-            last_frame_time_cnt = tx_event.TxTimestamp;
         }
 
-        led_blink_green();
+        led_blink_txd();
     }
 
-    // Message has been accepted, pull it from the buffer
-    if (HAL_FDCAN_GetRxMessage(&can_handle, FDCAN_RX_FIFO0, &rx_msg_header, rx_msg_data) == HAL_OK)
+    // If a message has been accepted, parse the frame
+    if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &rx_msg_header, rx_msg_data) == HAL_OK)
     {
-        int32_t len = slcan_parse_rx_frame(buf_get_cdc_dest(), &rx_msg_header, rx_msg_data);
-        buf_comit_cdc_dest(len);
+        uint16_t len = gen_generate_rx_frame(buf_reserve_cdc_dest(SLCAN_MTU), &rx_msg_header, rx_msg_data);
+        buf_commit_cdc_dest(len);
 
-        if (rx_msg_header.RxTimestamp != last_frame_time_cnt)   // Don't count same frame.
-        {
-            bit_cnt_message += can_get_bit_number_in_rx_frame(&rx_msg_header);
-            last_frame_time_cnt = rx_msg_header.RxTimestamp;
-        }
+        bit_cnt_message += can_get_bit_number_in_rx_frame(&rx_msg_header);
 
-        led_blink_blue();
+        led_blink_rxd();
     }
 
-    // Message has been received but not been accepted, pull it from the buffer
-    if (HAL_FDCAN_GetRxMessage(&can_handle, FDCAN_RX_FIFO1, &rx_msg_header, rx_msg_data) == HAL_OK)
+    // If a message has been received but not been accepted, pull it from the buffer
+    if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO1, &rx_msg_header, rx_msg_data) == HAL_OK)
     {
-        if (rx_msg_header.RxTimestamp != last_frame_time_cnt)   // Don't count same frame.
-        {
-            bit_cnt_message += can_get_bit_number_in_rx_frame(&rx_msg_header);
-            last_frame_time_cnt = rx_msg_header.RxTimestamp;
-        }
+        bit_cnt_message += can_get_bit_number_in_rx_frame(&rx_msg_header);
 
-        led_blink_blue();
+        led_blink_rxd();
     }
 
     // Update bus load
     static uint32_t tick_last = 0;
     uint32_t tick_now = HAL_GetTick();
-    if (100 <= (uint32_t)(tick_now - tick_last))    // Update in every 100ms interval
+    if (CAN_BUS_LOAD_CYCLE_MS <= (uint32_t)(tick_now - tick_last))    // Update in every 100ms interval
     {
-        uint32_t rate_us_per_ms = (uint32_t)bit_cnt_message * can_bit_time_ns / 1000 / 100;   // MAX: 1000 @ 1Mbps
-        can_bus_load_ppm = (can_bus_load_ppm * 7 + (uint32_t)CAN_BUS_LOAD_BUILDUP_PPM * rate_us_per_ms / 1000) >> 3;
+        // Bus occupied time (us) / Interval (ms)
+        uint32_t rate_us_per_ms = (uint32_t)bit_cnt_message * can_bit_time_ns;  // MAX: 100000000
+        rate_us_per_ms = rate_us_per_ms / 1000 / CAN_BUS_LOAD_CYCLE_MS;         // MAX: 1000
+
+        // Apply exponential moving average (alpha = 1/8) to smooth the value
+        can_bus_load_ppm = (can_bus_load_ppm * 7 + (uint32_t)1000000 * rate_us_per_ms / 1000) >> 3;
+
         bit_cnt_message = 0;
         tick_last = tick_now;
     }
 
-    // Check for message loss
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_TX_EVT_FIFO_ELT_LOST))
+    // Poll the FDCAN status registers only while the channel is open.
+    // can_disable() DeInit's the peripheral, which gates its bus clock via
+    // HAL_FDCAN_MspDeInit -> __HAL_RCC_FDCAN_CLK_DISABLE. RM0444 (RCC chapter)
+    // states that register accesses to a peripheral whose clock is not active
+    // are "not effective", so reading IR/PSR/ECR and clearing IR flags below
+    // would be undefined while closed. HAL_FDCAN_GetProtocolStatus() and
+    // HAL_FDCAN_GetErrorCounters() have no state check of their own (unlike
+    // GetTxEvent/GetRxMessage above), hence the explicit gate here.
+    // Nothing below is needed while closed: can_error_state is reset by
+    // can_enable() and `F`/`f` are rejected by the parser while closed.
+    if (can_bus_state == BUS_OPENED)
     {
-        error_assert(ERR_CAN_TXFAIL);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_TX_EVT_FIFO_ELT_LOST);
-    }
+        // Check for message loss
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_TX_EVT_FIFO_ELT_LOST))
+        {
+            gen_raise_error(SLCAN_STS_DATA_OVERRUN);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_TX_EVT_FIFO_ELT_LOST);
+        }
 
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST))
-    {
-        error_assert(ERR_CAN_RXFAIL);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
-    }
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST))
+        {
+            gen_raise_error(SLCAN_STS_DATA_OVERRUN);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST);
+        }
 
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST))
-    {
-        error_assert(ERR_CAN_RXFAIL);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST);
-    }
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST))
+        {
+            gen_raise_error(SLCAN_STS_DATA_OVERRUN);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST);
+        }
 
-    // Check for bus state and error counter
-    FDCAN_ProtocolStatusTypeDef sts;
-    FDCAN_ErrorCountersTypeDef cnt;
+        // Snapshot consistency (relevant to the `f` command, a debug aid):
+        // PSR (node state, LEC/DLEC) and ECR (TEC/REC) are two separate reads a
+        // few cycles apart. An error event landing in between can leave one
+        // can_error_state snapshot inconsistent (e.g. err_pssv=0 with
+        // tx_err_cnt=128); it self-corrects on the next poll. last_err_code is
+        // a sticky latch (last error since open, never cleared by `F`) and
+        // bus load is a 100 ms moving average, so neither describes the same
+        // instant as the node state / counters. Accepted for a debug query.
 
-    HAL_FDCAN_GetProtocolStatus(&can_handle, &sts);
-    HAL_FDCAN_GetErrorCounters(&can_handle, &cnt);
+        // Check for bus state and error counters
+        FDCAN_ProtocolStatusTypeDef sts;
+        FDCAN_ErrorCountersTypeDef cnt;
 
-    uint8_t rx_err_cnt = (uint8_t)(cnt.RxErrorPassive ? 128 : cnt.RxErrorCnt);
-    if (rx_err_cnt > can_error_state.rec || cnt.TxErrorCnt > can_error_state.tec) error_assert(ERR_CAN_BUS_ERR);
-    if (sts.BusOff && !can_error_state.bus_off) error_assert(ERR_CAN_BUS_ERR);  // Capture counter increase that caused bus off
+        if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &sts) == HAL_OK &&
+            HAL_FDCAN_GetErrorCounters(&hfdcan1, &cnt) == HAL_OK)
+        {
+            uint8_t rec = (uint8_t)(cnt.RxErrorPassive ? 128 : cnt.RxErrorCnt);
+            can_error_state.bus_off = (uint8_t)sts.BusOff;
+            can_error_state.err_pssv = (uint8_t)sts.ErrorPassive;
+            can_error_state.tx_err_cnt = (uint8_t)cnt.TxErrorCnt;
+            can_error_state.rx_err_cnt = (uint8_t)rec;
 
-    can_error_state.bus_off = (uint8_t)sts.BusOff;
-    can_error_state.err_pssv = (uint8_t)sts.ErrorPassive;
-    can_error_state.tec = (uint8_t)cnt.TxErrorCnt;
-    can_error_state.rec = (uint8_t)rx_err_cnt;
-    if (sts.DataLastErrorCode != FDCAN_PROTOCOL_ERROR_NONE && sts.DataLastErrorCode != FDCAN_PROTOCOL_ERROR_NO_CHANGE)
-        can_error_state.last_err_code = sts.DataLastErrorCode;
-    if (sts.LastErrorCode != FDCAN_PROTOCOL_ERROR_NONE && sts.LastErrorCode != FDCAN_PROTOCOL_ERROR_NO_CHANGE)
-        can_error_state.last_err_code = sts.LastErrorCode;
+            // Check for error code (See the link for the intended behavior)
+            // https://github.com/Nakakiyo092/canable2-fw/issues/68
+            if (sts.DataLastErrorCode != FDCAN_PROTOCOL_ERROR_NONE && sts.DataLastErrorCode != FDCAN_PROTOCOL_ERROR_NO_CHANGE)
+                can_error_state.last_err_code = sts.DataLastErrorCode;
+            if (sts.LastErrorCode != FDCAN_PROTOCOL_ERROR_NONE && sts.LastErrorCode != FDCAN_PROTOCOL_ERROR_NO_CHANGE)
+                can_error_state.last_err_code = sts.LastErrorCode;
+        }
 
-    // Check for bus error flags
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_ERROR_WARNING))
-    {
-        error_assert(ERR_CAN_WARNING);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_ERROR_WARNING);
-    }
+        // BUS_ERROR on any FDCAN protocol error event (PEA/PED sticky flags).
+        // See: https://github.com/Nakakiyo092/usb2canfdv1/issues/167
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_ARB_PROTOCOL_ERROR))
+        {
+            gen_raise_error(SLCAN_STS_BUS_ERROR);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_ARB_PROTOCOL_ERROR);
+        }
 
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_ERROR_PASSIVE))
-    {
-        error_assert(ERR_CAN_ERR_PASSIVE);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_ERROR_PASSIVE);
-    }
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_DATA_PROTOCOL_ERROR))
+        {
+            gen_raise_error(SLCAN_STS_BUS_ERROR);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_DATA_PROTOCOL_ERROR);
+        }
 
-    if (__HAL_FDCAN_GET_FLAG(&can_handle, FDCAN_FLAG_BUS_OFF))
-    {
-        error_assert(ERR_CAN_BUS_OFF);
-        __HAL_FDCAN_CLEAR_FLAG(&can_handle, FDCAN_FLAG_BUS_OFF);
+        // Check for bus error flags
+        // See the link for the difference from the bus status
+        // https://github.com/Nakakiyo092/canable2-fw/issues/63
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_ERROR_WARNING))
+        {
+            gen_raise_error(SLCAN_STS_ERROR_WARNING);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_ERROR_WARNING);
+        }
+
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_ERROR_PASSIVE))
+        {
+            gen_raise_error(SLCAN_STS_ERROR_PASSIVE);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_ERROR_PASSIVE);
+        }
+
+        if (__HAL_FDCAN_GET_FLAG(&hfdcan1, FDCAN_FLAG_BUS_OFF))
+        {
+            gen_raise_error(SLCAN_STS_BUS_OFF);
+            __HAL_FDCAN_CLEAR_FLAG(&hfdcan1, FDCAN_FLAG_BUS_OFF);
+        }
     }
 
     // Update cycle time
+    // On the very first call after boot, last_time_stamp_cnt is 0, so the delta
+    // represents the time from TIM3 init to the first can_process() — i.e. the
+    // boot-to-mainloop latency. We intentionally treat this as "iteration 0"
+    // and include it in the max/average: cycle_max is the longest interval the
+    // system has ever experienced, and boot latency qualifies. Valid as long
+    // as boot stays below the TIM3 wrap period (65.5 ms).
     static uint32_t last_time_stamp_cnt = 0;
-    uint16_t curr_time_stamp_cnt = HAL_FDCAN_GetTimestampCounter(&can_handle);
+    uint16_t curr_time_stamp_cnt = (TIM3->CNT);
     uint32_t cycle_time_ns;
     if (last_time_stamp_cnt <= curr_time_stamp_cnt)
         cycle_time_ns = ((uint32_t)curr_time_stamp_cnt - last_time_stamp_cnt) * 1000;
@@ -340,19 +421,20 @@ void can_process(void)
 
     if (can_cycle_max_time_ns < cycle_time_ns)
         can_cycle_max_time_ns = cycle_time_ns;
-        
+
+    //  Apply exponential moving average (alpha = 1/16)
     can_cycle_ave_time_ns = ((uint32_t)can_cycle_ave_time_ns * 15 + cycle_time_ns) >> 4;
     
     last_time_stamp_cnt = curr_time_stamp_cnt;
 
-    // Green LED on during bus closed
+    // TX LED on during bus closed
     if (can_bus_state == BUS_CLOSED)
-        led_turn_green(LED_ON);
+        led_turn_txd(LED_ON);
 
 }
 
 // Set the nominal bitrate of the CAN peripheral
-HAL_StatusTypeDef can_set_bitrate(enum can_bitrate bitrate)
+HAL_StatusTypeDef can_set_nominal_bitrate(enum CanBitrateNominal bitrate)
 {
     if (can_bus_state == BUS_OPENED)
     {
@@ -360,56 +442,45 @@ HAL_StatusTypeDef can_set_bitrate(enum can_bitrate bitrate)
         return HAL_ERROR;
     }
 
-    // peripheral clock speed 160M
-
-    // Set default bitrate 125k
-    can_bitrate_nominal.prescaler = 16;
-    can_bitrate_nominal.sjw = 8;
-    can_bitrate_nominal.time_seg1 = 70;
-    can_bitrate_nominal.time_seg2 = 9;
+    // Set default bitrate 125kbps at 87.5% sampling point
+    // Equivalent to sxxyy command with BTR0=0x03, BTR1=0x1C
+    can_bit_cfg_nominal.prescaler = 8;
+    can_bit_cfg_nominal.sjw = 5;
+    can_bit_cfg_nominal.time_seg1 = 69;
+    can_bit_cfg_nominal.time_seg2 = 10;
 
     switch (bitrate)
     {
     case CAN_BITRATE_10K:
-        can_bitrate_nominal.prescaler = 200;
+        can_bit_cfg_nominal.prescaler = 100;
         break;
     case CAN_BITRATE_20K:
-        can_bitrate_nominal.prescaler = 100;
+        can_bit_cfg_nominal.prescaler = 50;
         break;
     case CAN_BITRATE_50K:
-        can_bitrate_nominal.prescaler = 40;
-        break;
-    case CAN_BITRATE_83K:
-        can_bitrate_nominal.prescaler = 120;
-        can_bitrate_nominal.sjw = 2;
-        can_bitrate_nominal.time_seg1 = 13;
-        can_bitrate_nominal.time_seg2 = 2;
+        can_bit_cfg_nominal.prescaler = 20;
         break;
     case CAN_BITRATE_100K:
-        can_bitrate_nominal.prescaler = 20;
+        can_bit_cfg_nominal.prescaler = 10;
         break;
     case CAN_BITRATE_125K:
         break;
     case CAN_BITRATE_250K:
-        can_bitrate_nominal.prescaler = 8;
+        can_bit_cfg_nominal.prescaler = 4;
         break;
     case CAN_BITRATE_500K:
-        can_bitrate_nominal.prescaler = 4;
-        break;
-    case CAN_BITRATE_666K:
-        can_bitrate_nominal.prescaler = 30;
-        can_bitrate_nominal.sjw = 1;
-        can_bitrate_nominal.time_seg1 = 6;
-        can_bitrate_nominal.time_seg2 = 1;
+        can_bit_cfg_nominal.prescaler = 2;
         break;
     case CAN_BITRATE_800K:
-        can_bitrate_nominal.prescaler = 2;
-        can_bitrate_nominal.sjw = 10;
-        can_bitrate_nominal.time_seg1 = 88;
-        can_bitrate_nominal.time_seg2 = 11;
+        // 87.5% is not achievable at 800kbps with 80MHz clock;
+        // use 87% (prescaler=1, N=100, SP=87/100) as the closest value.
+        can_bit_cfg_nominal.prescaler = 1;
+        can_bit_cfg_nominal.sjw = 7;
+        can_bit_cfg_nominal.time_seg1 = 86;
+        can_bit_cfg_nominal.time_seg2 = 13;
         break;
     case CAN_BITRATE_1000K:
-        can_bitrate_nominal.prescaler = 2;
+        can_bit_cfg_nominal.prescaler = 1;
         break;
     default:
         return HAL_ERROR;
@@ -419,7 +490,7 @@ HAL_StatusTypeDef can_set_bitrate(enum can_bitrate bitrate)
 }
 
 // Set the data bitrate of the CAN peripheral
-HAL_StatusTypeDef can_set_data_bitrate(enum can_data_bitrate bitrate)
+HAL_StatusTypeDef can_set_data_bitrate(enum CanBitrateData bitrate)
 {
     if (can_bus_state == BUS_OPENED)
     {
@@ -428,35 +499,32 @@ HAL_StatusTypeDef can_set_data_bitrate(enum can_data_bitrate bitrate)
     }
 
     // Set default bitrate 2M
-    can_bitrate_data.prescaler = 2;
-    can_bitrate_data.sjw = 8;
-    can_bitrate_data.time_seg1 = 30;
-    can_bitrate_data.time_seg2 = 9;
+    can_bit_cfg_data.prescaler = 1;
+    can_bit_cfg_data.sjw = 8;
+    can_bit_cfg_data.time_seg1 = 30;
+    can_bit_cfg_data.time_seg2 = 9;
 
     switch (bitrate)
     {
     case CAN_DATA_BITRATE_500K:
-        can_bitrate_data.prescaler = 8;
+        can_bit_cfg_data.prescaler = 4;
         break;
     case CAN_DATA_BITRATE_1M:
-        can_bitrate_data.prescaler = 4;
+        can_bit_cfg_data.prescaler = 2;
         break;
     case CAN_DATA_BITRATE_2M:
         break;
     case CAN_DATA_BITRATE_4M:
-        can_bitrate_data.prescaler = 1;
+        can_bit_cfg_data.prescaler = 1;
+        can_bit_cfg_data.sjw = 4;
+        can_bit_cfg_data.time_seg1 = 14;
+        can_bit_cfg_data.time_seg2 = 5;
         break;
     case CAN_DATA_BITRATE_5M:
-        can_bitrate_data.prescaler = 1;
-        can_bitrate_data.sjw = 6;
-        can_bitrate_data.time_seg1 = 24;
-        can_bitrate_data.time_seg2 = 7;
-        break;
-    case CAN_DATA_BITRATE_8M:
-        can_bitrate_data.prescaler = 1;
-        can_bitrate_data.sjw = 3;
-        can_bitrate_data.time_seg1 = 14;
-        can_bitrate_data.time_seg2 = 5;
+        can_bit_cfg_data.prescaler = 1;
+        can_bit_cfg_data.sjw = 3;
+        can_bit_cfg_data.time_seg1 = 11;
+        can_bit_cfg_data.time_seg2 = 4;
         break;
     default:
         return HAL_ERROR;
@@ -466,7 +534,7 @@ HAL_StatusTypeDef can_set_data_bitrate(enum can_data_bitrate bitrate)
 }
 
 // Set the nominal bitrate configuration of the CAN peripheral
-HAL_StatusTypeDef can_set_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg)
+HAL_StatusTypeDef can_set_nominal_bitrate_cfg(struct CanBitrateCfg bitrate_cfg)
 {
     if (can_bus_state == BUS_OPENED)
     {
@@ -479,13 +547,13 @@ HAL_StatusTypeDef can_set_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg)
     if (!IS_FDCAN_NOMINAL_TSEG2(bitrate_cfg.time_seg2)) return HAL_ERROR;
     if (!IS_FDCAN_NOMINAL_SJW(bitrate_cfg.sjw)) return HAL_ERROR;
 
-    can_bitrate_nominal = bitrate_cfg;
+    can_bit_cfg_nominal = bitrate_cfg;
 
     return HAL_OK;
 }
 
 // Set the data bitrate configuration of the CAN peripheral
-HAL_StatusTypeDef can_set_data_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg)
+HAL_StatusTypeDef can_set_data_bitrate_cfg(struct CanBitrateCfg bitrate_cfg)
 {
     if (can_bus_state == BUS_OPENED)
     {
@@ -498,35 +566,36 @@ HAL_StatusTypeDef can_set_data_bitrate_cfg(struct can_bitrate_cfg bitrate_cfg)
     if (!IS_FDCAN_DATA_TSEG2(bitrate_cfg.time_seg2)) return HAL_ERROR;
     if (!IS_FDCAN_DATA_SJW(bitrate_cfg.sjw)) return HAL_ERROR;
 
-    can_bitrate_data = bitrate_cfg;
+    can_bit_cfg_data = bitrate_cfg;
 
     return HAL_OK;
 }
 
 // Get the data bitrate configuration of the CAN peripheral
-struct can_bitrate_cfg can_get_data_bitrate_cfg(void)
+struct CanBitrateCfg can_get_data_bitrate_cfg(void)
 {
-    return can_bitrate_data;
+    return can_bit_cfg_data;
 }
 
 // Get the nominal bitrate configuration of the CAN peripheral
-struct can_bitrate_cfg can_get_bitrate_cfg(void)
+struct CanBitrateCfg can_get_nominal_bitrate_cfg(void)
 {
-    return can_bitrate_nominal;
+    return can_bit_cfg_nominal;
 }
 
 // Set filter for standard CAN ID
-HAL_StatusTypeDef can_set_filter_std(FunctionalState state, uint32_t code, uint32_t mask)
+// Code and mask entries outside the valid range are left unchanged.
+HAL_StatusTypeDef can_set_filter1_std(FunctionalState state, uint32_t code, uint32_t mask)
 {
     HAL_StatusTypeDef ret = HAL_OK;
-    
+
     if (can_bus_state == BUS_OPENED) return HAL_ERROR;
     if (state == ENABLE)
         can_std_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
     else if (state == DISABLE)
         can_std_filter.FilterConfig = FDCAN_FILTER_DISABLE;
     else
-        ret = HAL_ERROR;
+        return HAL_ERROR;
 
     if (code > 0x7FF)
         ret = HAL_ERROR;
@@ -537,22 +606,23 @@ HAL_StatusTypeDef can_set_filter_std(FunctionalState state, uint32_t code, uint3
         ret = HAL_ERROR;
     else
         can_std_filter.FilterID2 = mask;
-    
+
     return ret;
 }
 
 // Set filter for extended CAN ID
-HAL_StatusTypeDef can_set_filter_ext(FunctionalState state, uint32_t code, uint32_t mask)
+// Code and mask entries outside the valid range are left unchanged.
+HAL_StatusTypeDef can_set_filter1_ext(FunctionalState state, uint32_t code, uint32_t mask)
 {
     HAL_StatusTypeDef ret = HAL_OK;
-    
+
     if (can_bus_state == BUS_OPENED) return HAL_ERROR;
     if (state == ENABLE)
         can_ext_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
     else if (state == DISABLE)
         can_ext_filter.FilterConfig = FDCAN_FILTER_DISABLE;
     else
-        ret = HAL_ERROR;
+        return HAL_ERROR;
 
     if (code > 0x1FFFFFFF)
         ret = HAL_ERROR;
@@ -563,7 +633,7 @@ HAL_StatusTypeDef can_set_filter_ext(FunctionalState state, uint32_t code, uint3
         ret = HAL_ERROR;
     else
         can_ext_filter.FilterID2 = mask;
-    
+
     return ret;
 }
 
@@ -609,6 +679,74 @@ uint32_t can_get_filter_ext_mask(void)
     return can_ext_filter.FilterID2 & 0x1FFFFFFF;
 }
 
+// Set second filter (FilterIndex=1) for standard CAN ID
+// state=ENABLE: acceptance filter routed to FIFO0; state=DISABLE: resets to pass-all drain (FIFO1)
+// Code and mask entries outside the valid range are left unchanged.
+HAL_StatusTypeDef can_set_filter2_std(FunctionalState state, uint32_t code, uint32_t mask)
+{
+    HAL_StatusTypeDef ret = HAL_OK;
+
+    if (can_bus_state == BUS_OPENED) return HAL_ERROR;
+
+    if (state == ENABLE)
+    {
+        can_std_pass_all.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+        if (code > 0x7FF)
+            ret = HAL_ERROR;
+        else
+            can_std_pass_all.FilterID1 = code;
+        if (mask > 0x7FF)
+            ret = HAL_ERROR;
+        else
+            can_std_pass_all.FilterID2 = mask;
+    }
+    else if (state == DISABLE)
+    {
+        // Reset to pass-all drain mode (FIFO1)
+        can_std_pass_all.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
+        can_std_pass_all.FilterID1 = 0x7FF;
+        can_std_pass_all.FilterID2 = 0x000;
+    }
+    else
+        return HAL_ERROR;
+
+    return ret;
+}
+
+// Set second filter (FilterIndex=1) for extended CAN ID
+// state=ENABLE: acceptance filter routed to FIFO0; state=DISABLE: resets to pass-all drain (FIFO1)
+// Code and mask entries outside the valid range are left unchanged.
+HAL_StatusTypeDef can_set_filter2_ext(FunctionalState state, uint32_t code, uint32_t mask)
+{
+    HAL_StatusTypeDef ret = HAL_OK;
+
+    if (can_bus_state == BUS_OPENED) return HAL_ERROR;
+
+    if (state == ENABLE)
+    {
+        can_ext_pass_all.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+        if (code > 0x1FFFFFFF)
+            ret = HAL_ERROR;
+        else
+            can_ext_pass_all.FilterID1 = code;
+        if (mask > 0x1FFFFFFF)
+            ret = HAL_ERROR;
+        else
+            can_ext_pass_all.FilterID2 = mask;
+    }
+    else if (state == DISABLE)
+    {
+        // Reset to pass-all drain mode (FIFO1)
+        can_ext_pass_all.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
+        can_ext_pass_all.FilterID1 = 0x1FFFFFFF;
+        can_ext_pass_all.FilterID2 = 0x00000000;
+    }
+    else
+        return HAL_ERROR;
+
+    return ret;
+}
+
 // Set CAN peripheral to the specific mode
 // normal: FDCAN_MODE_NORMAL
 // silent: FDCAN_MODE_BUS_MONITORING
@@ -618,7 +756,12 @@ HAL_StatusTypeDef can_set_mode(uint32_t mode)
 {
     if (can_bus_state == BUS_OPENED)
     {
-        // cannot set silent mode while on bus
+        // cannot set mode while on bus
+        return HAL_ERROR;
+    }
+    if (!IS_FDCAN_MODE(mode))
+    {
+        // out of range (RESTRICTED can be accepted)
         return HAL_ERROR;
     }
     can_mode = mode;
@@ -640,21 +783,23 @@ HAL_StatusTypeDef can_set_auto_retransmit(FunctionalState state)
 }
 
 // Return bus status
-enum can_bus_state can_get_bus_state(void)
+enum CanBusState can_get_bus_state(void)
 {
     return can_bus_state;
 }
 
-struct can_error_state can_get_error_state(void)
+// Return protocol status and error counters
+struct CanErrorState can_get_error_state(void)
 {
     return can_error_state;
 }
 
+// Return state if CAN frame tx is possible
 FunctionalState can_is_tx_enabled(void)
 {
     if (can_bus_state == BUS_CLOSED)
         return DISABLE;
-    else if (can_handle.Init.Mode == FDCAN_MODE_BUS_MONITORING)
+    else if (can_mode == FDCAN_MODE_BUS_MONITORING)
         return DISABLE;
     else if (can_error_state.bus_off)
         return DISABLE;
@@ -663,14 +808,21 @@ FunctionalState can_is_tx_enabled(void)
 }
 
 // Return CAN bus load in ppm
+// The value is theoretical bus load which is a hypothetical bus load without bit stuffing.
+// Fixed stuff bits in the CRC field in a CAN FD frame are included in the calculation,
+// while variable bit stuffing (data-dependent) is not considered.
+// The calculation includes only data and remote frames that were successfully transmitted and received.
+// Error frames and overload frames are excluded from the calculation.
 uint32_t can_get_bus_load_ppm(void)
 {
     return can_bus_load_ppm;
 }
 
-// Clear the maximum and average cycle time
+// Clear the maximum and average cycle time.
 void can_clear_cycle_time(void)
 {
+    // Reset metrics only. last_time_stamp_cnt is left untouched so the next
+    // sample remains a valid loop interval and not a spurious gap.
     can_cycle_max_time_ns = 0;
     can_cycle_ave_time_ns = 0;
 }
@@ -690,24 +842,27 @@ uint32_t can_get_cycle_ave_time_ns(void)
 // Return reference to CAN handle
 FDCAN_HandleTypeDef *can_get_handle(void)
 {
-    return &can_handle;
+    return &hfdcan1;
 }
 
 // Get the nominal one bit time in nanoseconds
-void can_update_bit_time_ns(void)
+static void can_update_bit_time_ns(void)
 {
-    can_bit_time_ns = ((uint32_t)1 + can_bitrate_nominal.time_seg1 + can_bitrate_nominal.time_seg2);
-    can_bit_time_ns = can_bit_time_ns * can_bitrate_nominal.prescaler;    // Tq in one bit
-    can_bit_time_ns = can_bit_time_ns * 1000;                             // MAX: (1 + 256 + 128) * 1000
-    can_bit_time_ns = can_bit_time_ns / 160;                              // Clock: 160MHz = (160 / 1000) GHz
+    // Number of time quanta (Tq) in one bit
+    can_bit_time_ns = ((uint32_t)1 + can_bit_cfg_nominal.time_seg1 + can_bit_cfg_nominal.time_seg2);
+    // ... times Tq [ns] = prescaler / CAN clock [GHz] = prescaler * 1000 / CAN clock [MHz]
+    can_bit_time_ns = can_bit_time_ns * can_bit_cfg_nominal.prescaler;
+    can_bit_time_ns = can_bit_time_ns * 1000;   // MAX: (1 + 255 + 128) * 255 * 1000
+    can_bit_time_ns = can_bit_time_ns / CAN_ROOT_CLOCK_MHZ;
 
     return;
 }
 
 // Return the duration of the rx frame in the nominal bit number
-uint16_t can_get_bit_number_in_rx_frame(FDCAN_RxHeaderTypeDef *pRxHeader)
+static uint16_t can_get_bit_number_in_rx_frame(FDCAN_RxHeaderTypeDef *pRxHeader)
 {
     uint16_t time_msg, time_data;
+    uint8_t data_bytes = can_dlc_to_bytes[CAN_HAL_DLC_TO_STD_DLC(pRxHeader->DataLength)];
 
     if (pRxHeader->RxFrameType == FDCAN_REMOTE_FRAME && pRxHeader->IdType == FDCAN_STANDARD_ID)
     {
@@ -719,34 +874,38 @@ uint16_t can_get_bit_number_in_rx_frame(FDCAN_RxHeaderTypeDef *pRxHeader)
     }
     else if (pRxHeader->FDFormat == FDCAN_CLASSIC_CAN && pRxHeader->IdType == FDCAN_STANDARD_ID)
     {
-        time_msg = CAN_BIT_NBR_WOD_CBFF + (uint16_t)hal_dlc_code_to_bytes(pRxHeader->DataLength) * 8;
+        time_msg = CAN_BIT_NBR_WOD_CBFF + (uint16_t)data_bytes * 8;
     }
     else if (pRxHeader->FDFormat == FDCAN_CLASSIC_CAN && pRxHeader->IdType == FDCAN_EXTENDED_ID)
     {
-        time_msg = CAN_BIT_NBR_WOD_CEFF + (uint16_t)hal_dlc_code_to_bytes(pRxHeader->DataLength) * 8;
+        time_msg = CAN_BIT_NBR_WOD_CEFF + (uint16_t)data_bytes * 8;
     }
     else    // For FD frames
     {
         if (pRxHeader->IdType == FDCAN_STANDARD_ID) time_msg = CAN_BIT_NBR_WOD_FBFF_ARBIT;
         else                                        time_msg = CAN_BIT_NBR_WOD_FEFF_ARBIT;
 
-        if (hal_dlc_code_to_bytes(pRxHeader->DataLength) <= 16)
+        if (data_bytes <= 16)
             time_data = CAN_BIT_NBR_WOD_FXFF_DATA_S;    // Short CRC
         else
             time_data = CAN_BIT_NBR_WOD_FXFF_DATA_L;    // Long CRC
 
-        time_data = time_data + (uint16_t)hal_dlc_code_to_bytes(pRxHeader->DataLength) * 8;
+        time_data = time_data + (uint16_t)data_bytes * 8;
 
         if (pRxHeader->BitRateSwitch == FDCAN_BRS_ON)
         {
-            if (can_bitrate_nominal.prescaler == 0) return 0;   // Uninitialized bitrate (avoid zero-div)
+            if (can_bit_cfg_nominal.prescaler == 0) return 0;   // Uninitialized bitrate (avoid zero-div)
 
             uint32_t rate_ppm;  // Nominal bit time vs data bit time
-            rate_ppm = ((uint32_t)1 + can_bitrate_data.time_seg1 + can_bitrate_data.time_seg2);
-            rate_ppm = rate_ppm * can_bitrate_data.prescaler;     // Tq in one bit (data)
-            rate_ppm = rate_ppm * 1000000;  // MAX: 32 * (32 + 16) * 1000000 
-            rate_ppm = rate_ppm / ((uint32_t)1 + can_bitrate_nominal.time_seg1 + can_bitrate_nominal.time_seg2);
-            rate_ppm = rate_ppm / can_bitrate_nominal.prescaler;
+            // Number of time quanta (Tq) in one bit for data phase
+            rate_ppm = ((uint32_t)1 + can_bit_cfg_data.time_seg1 + can_bit_cfg_data.time_seg2);
+            // ... times Tq [ns] = prescaler / CAN clock [GHz], but CAN clock will be canceled
+            rate_ppm = rate_ppm * can_bit_cfg_data.prescaler;
+            rate_ppm = rate_ppm * 1000000;      // MAX: (1 + 32 + 16) * 32 * 1000000
+            // Divide by number of time quanta (Tq) in one bit for nominal phase
+            rate_ppm = rate_ppm / ((uint32_t)1 + can_bit_cfg_nominal.time_seg1 + can_bit_cfg_nominal.time_seg2);
+            // ... times Tq [ns] = prescaler / CAN clock [GHz], but CAN clock is canceled
+            rate_ppm = rate_ppm / can_bit_cfg_nominal.prescaler;
 
             time_msg = time_msg + ((uint32_t)time_data * rate_ppm) / 1000000;
         }
@@ -759,7 +918,7 @@ uint16_t can_get_bit_number_in_rx_frame(FDCAN_RxHeaderTypeDef *pRxHeader)
 }
 
 // Return the duration of the tx event in the nominal bit number
-uint16_t can_get_bit_number_in_tx_event(FDCAN_TxEventFifoTypeDef *pTxEvent)
+static uint16_t can_get_bit_number_in_tx_event(FDCAN_TxEventFifoTypeDef *pTxEvent)
 {
     FDCAN_RxHeaderTypeDef frame_header;
     //frame_header.Identifier = pTxEvent->Identifier;
@@ -772,3 +931,72 @@ uint16_t can_get_bit_number_in_tx_event(FDCAN_TxEventFifoTypeDef *pTxEvent)
     //frame_header.RxTimestamp = pTxEvent->TxTimestamp;
     return can_get_bit_number_in_rx_frame(&frame_header);
 }
+
+#ifdef DEBUG
+// Switch TDC override to AUTO (the default), cancelling a pending override.
+// Rejected while the bus is open since FDCAN config must happen in INIT mode.
+HAL_StatusTypeDef can_set_tdc_auto(void)
+{
+    if (can_bus_state != BUS_CLOSED) return HAL_ERROR;
+    can_tdc_mode = CAN_TDC_AUTO;
+    return HAL_OK;
+}
+
+// Force TDC off regardless of bit timing. Applies to the next can_enable only.
+HAL_StatusTypeDef can_set_tdc_disabled(void)
+{
+    if (can_bus_state != BUS_CLOSED) return HAL_ERROR;
+    can_tdc_mode = CAN_TDC_DISABLED;
+    return HAL_OK;
+}
+
+// Use the given TDCO/TDCF on the next can_enable only. Values are 7-bit; callers
+// must validate (0..0x7F).
+HAL_StatusTypeDef can_set_tdc_manual(uint8_t tdco, uint8_t tdcf)
+{
+    if (can_bus_state != BUS_CLOSED) return HAL_ERROR;
+    if (tdco > 0x7F || tdcf > 0x7F) return HAL_ERROR;
+    can_tdc_manual_tdco = tdco;
+    can_tdc_manual_tdcf = tdcf;
+    can_tdc_mode = CAN_TDC_MANUAL;
+    return HAL_OK;
+}
+
+// Read the live TDC values from the FDCAN peripheral. TDCV is the
+// hardware-measured Tx delay (updated each FD frame).
+//
+// IMPORTANT: only valid while BUS_OPENED. After can_disable() the
+// peripheral has been DeInit'd, which gates the FDCAN bus clock via
+// HAL_FDCAN_MspDeInit -> __HAL_RCC_FDCAN_CLK_DISABLE. Touching the
+// FDCAN registers in that state is undefined and can HardFault.
+// When closed we therefore return all-zero rather than reading.
+//
+// SIDE EFFECT on can_error_state.last_err_code (`f` command):
+// HAL_FDCAN_GetProtocolStatus() reads the whole PSR word, and the M_CAN
+// spec marks PSR.LEC / PSR.DLEC as "Set on read": any read replaces them
+// with 7 (NO_CHANGE). The latch in can_process() deliberately ignores
+// NO_CHANGE, so a protocol error that occurred between the previous
+// can_process() poll and this call is consumed here and never reaches
+// last_err_code. IR.PEA/PED (F bit 7), TEC/REC and the EW/EP/BO flags
+// are not affected; only the error *code* of that one window is lost,
+// and only in DEBUG builds while a TDC query is being served. Accepted
+// for a debug-only query. If it ever matters, feed `status` through the
+// same LEC/DLEC latch that can_process() uses instead of discarding it.
+struct CanTdcLiveState can_get_tdc_state(void)
+{
+    struct CanTdcLiveState s = {0};
+    if (can_bus_state == BUS_OPENED)
+    {
+        FDCAN_ProtocolStatusTypeDef status;
+        if (HAL_FDCAN_GetProtocolStatus(&hfdcan1, &status) == HAL_OK)
+        {
+            s.tdcv = (uint8_t)status.TDCvalue;
+        }
+        uint32_t tdcr = hfdcan1.Instance->TDCR;
+        s.tdco = (uint8_t)((tdcr & FDCAN_TDCR_TDCO_Msk) >> FDCAN_TDCR_TDCO_Pos);
+        s.tdcf = (uint8_t)((tdcr & FDCAN_TDCR_TDCF_Msk) >> FDCAN_TDCR_TDCF_Pos);
+        s.enabled = (hfdcan1.Instance->DBTP & FDCAN_DBTP_TDC) ? 1U : 0U;
+    }
+    return s;
+}
+#endif
