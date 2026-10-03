@@ -482,6 +482,9 @@ HAL_StatusTypeDef can_set_nominal_bitrate(enum CanBitrateNominal bitrate)
     case CAN_BITRATE_1000K:
         can_bit_cfg_nominal.prescaler = 1;
         break;
+    case CAN_BITRATE_83K:
+        can_bit_cfg_nominal.prescaler = 12;
+        break;
     default:
         return HAL_ERROR;
     }
