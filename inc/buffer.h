@@ -21,13 +21,6 @@
 #include <stdint.h>
 #include "can.h"
 
-// CDC transmit buffering
-#define BUF_CDC_TX_NUM_BUFS 3U      // Should be >= 3 (triple buffering) to avoid dead lock
-#define BUF_CDC_TX_BUF_SIZE 4096U   // Set to 64 * 64 for max single packet size
-
-// CAN transmit buffering
-#define BUF_CAN_TXQUEUE_LEN 64U  // Number of buffers allocated
-
 // Prototypes
 void buf_init(void);
 void buf_process(void);

@@ -24,27 +24,34 @@
 #include "led.h"
 #include "parser.h"
 
-// APP FIFO release pacing — bound on (send − tail) before forced release.
+// CDC transmit buffering
+#define BUF_CDC_TX_NUM_BUFS             3U      // Should be >= 3 (triple buffering) to avoid dead lock
+#define BUF_CDC_TX_BUF_SIZE             4096U   // Set to 64 * 64 for max single packet size
+
+// Bytes read from the CDC Rx FIFO per call of buf_process (one full-speed packet)
+#define BUF_CDC_RX_CHUNK_SIZE           64U
+
+// CAN transmit buffering
+#define BUF_CAN_TXQUEUE_LEN             64U     // Number of buffers allocated
+
+// APP FIFO release pacing - bound on (send - tail) before forced release.
 //
 // Worst case: a burst of successes followed by all-failure pushes while
 // the HAL TEF drains.
-//   loop 1: push 3 frames, all succeed → 3 events fill HAL TEF
+//   loop 1: push 3 frames, all succeed -> 3 events fill HAL TEF
 //   loops 2-4: push 3 frames each, all fail; process 1 event per loop
 //   After loop 4: send=12, tail=3, nbr_sent_frames = TFQ * TEF = 9
 //
 // Other shapes stay below this peak:
 //   - All-failure runs: TEF stays empty, growth is capped by buf_release_can_tail().
 //   - Mixed runs: each released success drags older failed entries along, so
-//     (send − tail) shrinks instead of drifting up.
+//     (send - tail) shrinks instead of drifting up.
 //
-// (3 * 3 * 2) = TFQ * TEF * Margin = 18 — 2× the worst case in case the
+// (3 * 3 * 2) = TFQ * TEF * Margin = 18 - 2x the worst case in case the
 // pattern repeats, and well below BUF_CAN_TXQUEUE_LEN (64) so genuine
 // overflow remains observable.
 // See also: https://github.com/Nakakiyo092/usb2canfdv1/issues/49
 #define BUF_MAX_NBR_SENT_FRAMES         (3 * 3 * 2)
-
-// Bytes read from the CDC Rx FIFO per call of buf_process (one full-speed packet)
-#define BUF_CDC_RX_CHUNK_SIZE           64U
 
 // A CDC Tx slot is handed over to the CDC Tx FIFO of tinyUSB at once
 _Static_assert(CFG_TUD_CDC_TX_BUFSIZE >= BUF_CDC_TX_BUF_SIZE, "CDC Tx FIFO must hold a whole CDC Tx slot");
@@ -277,7 +284,7 @@ uint8_t *buf_get_can_head_data(void)
 // the special case where the marker-search loop exits without iterating).
 // Does NOT raise an error: per buffer.c's reporting policy, this query is
 // neither a buffer-full condition nor a data-loss event in the buffer's
-// processing path — interpreting a NULL return is the caller's business.
+// processing path - interpreting a NULL return is the caller's business.
 uint8_t *buf_get_can_sent_data(uint8_t marker)
 {
     uint8_t idx = buf_can_tx.tail;
