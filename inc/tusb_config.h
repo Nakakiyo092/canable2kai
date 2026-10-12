@@ -32,14 +32,10 @@
 // Device classes
 #define CFG_TUD_CDC                 1
 
-// CDC FIFO sizes
+// CDC FIFO sizes. The Tx FIFO takes a whole CDC Tx slot of buffer.c at once
+// (BUF_CDC_TX_BUF_SIZE), and its content is sent in a single transfer.
 #define CFG_TUD_CDC_RX_BUFSIZE      1024
-#define CFG_TUD_CDC_TX_BUFSIZE      1024
-
-// CDC transfer sizes. Rx uses one packet per transfer, which does not depend
-// on the host sending a ZLP. Tx sends up to 512 bytes per transfer.
-#define CFG_TUD_CDC_RX_EPSIZE       64
-#define CFG_TUD_CDC_TX_EPSIZE       512
+#define CFG_TUD_CDC_TX_BUFSIZE      4096
 
 // Keep Tx data while the host has not set DTR. When the FIFO is full, the data
 // stays in the application buffer and its overflow is reported by the F flag.

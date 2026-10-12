@@ -46,6 +46,9 @@
 // Bytes read from the CDC Rx FIFO per call of buf_process (one full-speed packet)
 #define BUF_CDC_RX_CHUNK_SIZE           64U
 
+// A CDC Tx slot is handed over to the CDC Tx FIFO of tinyUSB at once
+_Static_assert(CFG_TUD_CDC_TX_BUFSIZE >= BUF_CDC_TX_BUF_SIZE, "CDC Tx FIFO must hold a whole CDC Tx slot");
+
 // Transmit buffering: circular FIFO buffer
 struct BufCdcTx
 {
@@ -68,7 +71,6 @@ struct BufCanTx
 
 // Private variables
 static struct BufCdcTx buf_cdc_tx = {0};
-static uint32_t buf_cdc_tx_sent = 0;            // Bytes of the next slot already written to the CDC Tx FIFO
 static struct BufCanTx buf_can_tx = {0};
 static uint8_t cmd_line_buf[SLCAN_MTU];          // Command line buffer
 static uint8_t cmd_line_buf_idx = 0;
@@ -83,7 +85,6 @@ void buf_init(void)
     buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
     buf_cdc_tx.tail = 0;
     buf_cdc_tx.msglen[buf_cdc_tx.tail] = 0;
-    buf_cdc_tx_sent = 0;
 
     buf_can_tx.head = 0;
     buf_can_tx.send = 0;
@@ -142,20 +143,16 @@ void buf_process(void)
             buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
         }
     }
-    // Copy the slot next to the tail into the CDC Tx FIFO as far as it fits.
-    // The slot is released when it has been copied completely.
+    // Hand over the slot next to the tail to the CDC Tx FIFO when the FIFO can take the whole slot.
     new_tail = (buf_cdc_tx.tail + 1) % BUF_CDC_TX_NUM_BUFS;
     if (new_tail != buf_cdc_tx.head)
     {
-        uint32_t len = tud_cdc_write(&buf_cdc_tx.data[new_tail][buf_cdc_tx_sent],
-                                     buf_cdc_tx.msglen[new_tail] - buf_cdc_tx_sent);
-        buf_cdc_tx_sent += len;
-        if (buf_cdc_tx_sent == buf_cdc_tx.msglen[new_tail])
+        if (buf_cdc_tx.msglen[new_tail] <= tud_cdc_write_available())
         {
+            tud_cdc_write(buf_cdc_tx.data[new_tail], buf_cdc_tx.msglen[new_tail]);
+            tud_cdc_write_flush();
             buf_cdc_tx.tail = new_tail;
-            buf_cdc_tx_sent = 0;
         }
-        if (0 < len) tud_cdc_write_flush();
     }
 
 
