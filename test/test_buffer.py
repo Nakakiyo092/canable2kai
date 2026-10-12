@@ -226,9 +226,10 @@ class BufferTestCase(unittest.TestCase):
         small bursts separated by short sleeps. The bursts are sized so
         the CDC Rx buffer never overflows (which would corrupt the
         request stream and skew the test). The host does NOT drain the
-        Tx buffer during the bursts, so replies accumulate on the device
-        side until the CDC Tx buffer (BUF_CDC_TX_NUM_BUFS * 4096 B ~= 12 kB
-        => ~2k replies) overflows.
+        Tx buffer during the bursts, so replies accumulate until the CDC
+        Tx buffers of the device and the host overflow. 6000 replies
+        (~36 kB) are well above the buffering of both sides (~16 kB on
+        the device: CDC Tx slots of the application and the USB stack).
 
         Expected:
         - The drained stream consists solely of intact expected_reply
@@ -255,7 +256,7 @@ class BufferTestCase(unittest.TestCase):
         # write while replies pile up in Tx since the host does not read.
         BURST = 50
         BURST_DELAY = 0.05      # 50 ms between bursts
-        N_REPLIES = 3000        # > 2k slots in CDC Tx ring -> guaranteed overflow
+        N_REPLIES = 6000        # Well above the device and host Tx buffering -> guaranteed overflow
         for _ in range(N_REPLIES // BURST):
             self.dut.ser.write(b"I\r" * BURST)
             time.sleep(BURST_DELAY)
