@@ -20,41 +20,6 @@
 
 #include <stdint.h>
 #include "can.h"
-#include "usbd_cdc.h"
-
-// CDC receive buffering
-#define BUF_CDC_RX_NUM_BUFS 8U      // Should be >= 3 (triple buffering) to avoid dead lock
-#define BUF_CDC_RX_BUF_SIZE CDC_DATA_FS_MAX_PACKET_SIZE // Size of RX buffer item
-
-// CDC transmit buffering
-#define BUF_CDC_TX_NUM_BUFS 3U      // Should be >= 3 (triple buffering) to avoid dead lock
-#define BUF_CDC_TX_BUF_SIZE 4096U   // Set to 64 * 64 for max single packet size
-
-// CAN transmit buffering
-#define BUF_CAN_TXQUEUE_LEN 64U  // Number of buffers allocated
-
-// Receive buffering: circular FIFO buffer
-struct BufCdcRx
-{
-    uint8_t data[BUF_CDC_RX_NUM_BUFS][BUF_CDC_RX_BUF_SIZE];
-    uint32_t msglen[BUF_CDC_RX_NUM_BUFS];
-    uint8_t data_drop[BUF_CDC_RX_NUM_BUFS]; // Sets when data is dropped before each element
-    uint8_t head;
-    uint8_t tail;
-};
-
-// Transmit buffering: circular FIFO buffer
-struct BufCdcTx
-{
-    uint8_t data[BUF_CDC_TX_NUM_BUFS][BUF_CDC_TX_BUF_SIZE];
-    uint32_t msglen[BUF_CDC_TX_NUM_BUFS];
-    uint8_t head;
-    uint8_t tail;
-};
-
-// Public variables
-extern volatile struct BufCdcTx buf_cdc_tx;
-extern volatile struct BufCdcRx buf_cdc_rx;
 
 // Prototypes
 void buf_init(void);

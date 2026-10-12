@@ -17,30 +17,53 @@
 
 // Manage cdc (rx and tx) and can (tx) buffer (including error handling related to data loss in buffer)
 
-#include "usbd_cdc_if.h"
+#include <string.h>
+#include "tusb.h"
 #include "buffer.h"
 #include "can.h"
 #include "led.h"
 #include "parser.h"
 
-// APP FIFO release pacing — bound on (send − tail) before forced release.
+// CDC transmit buffering
+#define BUF_CDC_TX_NUM_BUFS             3U      // Should be >= 3 (triple buffering) to avoid dead lock
+#define BUF_CDC_TX_BUF_SIZE             4096U   // Set to 64 * 64 for max single packet size
+
+// Bytes read from the CDC Rx FIFO per call of buf_process (one full-speed packet)
+#define BUF_CDC_RX_CHUNK_SIZE           64U
+
+// CAN transmit buffering
+#define BUF_CAN_TXQUEUE_LEN             64U     // Number of buffers allocated
+
+// APP FIFO release pacing - bound on (send - tail) before forced release.
 //
 // Worst case: a burst of successes followed by all-failure pushes while
 // the HAL TEF drains.
-//   loop 1: push 3 frames, all succeed → 3 events fill HAL TEF
+//   loop 1: push 3 frames, all succeed -> 3 events fill HAL TEF
 //   loops 2-4: push 3 frames each, all fail; process 1 event per loop
 //   After loop 4: send=12, tail=3, nbr_sent_frames = TFQ * TEF = 9
 //
 // Other shapes stay below this peak:
 //   - All-failure runs: TEF stays empty, growth is capped by buf_release_can_tail().
 //   - Mixed runs: each released success drags older failed entries along, so
-//     (send − tail) shrinks instead of drifting up.
+//     (send - tail) shrinks instead of drifting up.
 //
-// (3 * 3 * 2) = TFQ * TEF * Margin = 18 — 2× the worst case in case the
+// (3 * 3 * 2) = TFQ * TEF * Margin = 18 - 2x the worst case in case the
 // pattern repeats, and well below BUF_CAN_TXQUEUE_LEN (64) so genuine
 // overflow remains observable.
 // See also: https://github.com/Nakakiyo092/usb2canfdv1/issues/49
 #define BUF_MAX_NBR_SENT_FRAMES         (3 * 3 * 2)
+
+// A CDC Tx slot is handed over to the CDC Tx FIFO of tinyUSB at once
+_Static_assert(CFG_TUD_CDC_TX_BUFSIZE >= BUF_CDC_TX_BUF_SIZE, "CDC Tx FIFO must hold a whole CDC Tx slot");
+
+// Transmit buffering: circular FIFO buffer
+struct BufCdcTx
+{
+    uint8_t data[BUF_CDC_TX_NUM_BUFS][BUF_CDC_TX_BUF_SIZE];
+    uint32_t msglen[BUF_CDC_TX_NUM_BUFS];
+    uint8_t head;
+    uint8_t tail;
+};
 
 // Cirbuf structure for CAN TX frames
 struct BufCanTx
@@ -53,33 +76,18 @@ struct BufCanTx
     uint8_t full;                               // Set this when it is full, clear when the tail moves one.
 };
 
-// Public variables (shared with interrupts)
-volatile struct BufCdcTx buf_cdc_tx = {0};
-volatile struct BufCdcRx buf_cdc_rx = {0};
-
 // Private variables
+static struct BufCdcTx buf_cdc_tx = {0};
 static struct BufCanTx buf_can_tx = {0};
 static uint8_t cmd_line_buf[SLCAN_MTU];          // Command line buffer
 static uint8_t cmd_line_buf_idx = 0;
-// Sticky CDC Rx re-sync flag. Set when a slot is observed with the producer-
-// overflow marker and cleared at the next '\r'. The flag spans slots so that
-// a long command (e.g. a B FD frame is ~139 chars and crosses ~3 USB packets)
-// whose middle packet is dropped still has its trailing fragment discarded —
-// without it, the leading random byte of the next, non-dropped slot could
-// land in the frame-command path and emit garbled CAN frames on the bus.
-static uint8_t cdc_rx_drop_resync = 0;
 
 // Private prototypes
 static HAL_StatusTypeDef buf_release_can_tail(void);
-static void buf_disable_irq(void);
-static void buf_enable_irq(void);
 
 // Initializes
 void buf_init(void)
 {
-    buf_cdc_rx.head = 0;
-    buf_cdc_rx.tail = 0;
-
     buf_cdc_tx.head = 1;
     buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
     buf_cdc_tx.tail = 0;
@@ -96,113 +104,63 @@ void buf_init(void)
 // Process
 void buf_process(void)
 {
-    uint32_t cpy_head, new_head;
-    uint32_t cpy_tail, new_tail;
+    uint32_t new_head, new_tail;
 
-	// This code for CDC buffer may include some redundant interrupt protection,
-	// but it will remain in place for safety unless removing it yields a significant performance benefit.
-	
-    // Process cdc receive buffer
-    // buf_cdc_rx.head is modified in interrupt, buf_cdc_rx.tail is referenced from interrupt.
-    // buf_cdc_rx.head is referenced from main loop, buf_cdc_rx.tail is modified in main loop.
-    // The head and tail are both 8-bit variable and atomic.
-    // No need for interrupt disabling but "memory" clobber and memory barrier would be safe against compiler optimizations and CPU reordering.
-    buf_disable_irq();
-    cpy_head = buf_cdc_rx.head;
-    buf_enable_irq();
-    if (buf_cdc_rx.tail != cpy_head)
+    // Process cdc receive data
+    // The CDC Rx and Tx FIFOs of tinyUSB are accessed only in the main loop (tud_task() and this function).
+    // When the Rx FIFO is full, tinyUSB stops accepting packets from the host instead of dropping data.
+    uint8_t rx_data[BUF_CDC_RX_CHUNK_SIZE];
+    uint32_t rx_len = tud_cdc_read(rx_data, sizeof(rx_data));
+    for (uint32_t i = 0; i < rx_len; i++)
     {
-        // Engage the sticky resync if the producer overflowed this slot.
-        // The torn data must be discarded all the way to the next '\r' —
-        // which may not appear in this slot — so the flag is set here and
-        // only cleared by the '\r' check in the byte loop below. The
-        // already-buffered partial command is dropped at the same time.
-        if (buf_cdc_rx.data_drop[buf_cdc_rx.tail])
+        uint8_t b = rx_data[i];
+
+        if (b == '\r')    // \r = [CR] = delimiter
         {
-            // CDC Rx buffer overflow is intentionally reported through the
-            // SLCAN status flag named SLCAN_STS_CAN_TX_FIFO_FULL (F bit 1).
-            // The bit-to-source mapping (CAN and CDC share the same bits) is
-            // defined in doc/2.-Command-List.md as the protocol contract.
-            gen_raise_error(SLCAN_STS_CAN_TX_FIFO_FULL);
+            psr_parse_str(cmd_line_buf, cmd_line_buf_idx);
             cmd_line_buf_idx = 0;
-            cdc_rx_drop_resync = 1;
-        }
 
-        // Process one whole buffer
-        for (uint32_t i = 0; i < buf_cdc_rx.msglen[buf_cdc_rx.tail]; i++)
+            // Blink RX LED as slcan rx if bus closed
+            if (can_get_bus_state() == BUS_CLOSED) led_blink_rxd();
+        }
+        else
         {
-            uint8_t b = buf_cdc_rx.data[buf_cdc_rx.tail][i];
+            // Accumulate chars to reassemble them into a line of command (terminated by a [CR])
+            cmd_line_buf[cmd_line_buf_idx++] = b;
 
-            // While the resync is engaged, discard every byte (including the
-            // '\r' that ends the torn command) until and including the first
-            // '\r'. The first non-resync byte after it begins a fresh command.
-            if (cdc_rx_drop_resync)
+            // Check for command length
+            if (cmd_line_buf_idx == SLCAN_MTU)
             {
-                if (b == '\r') cdc_rx_drop_resync = 0;
-                continue;
-            }
-
-            if (b == '\r')    // \r = [CR] = delimiter
-            {
-                psr_parse_str(cmd_line_buf, cmd_line_buf_idx);
-                cmd_line_buf_idx = 0;
-
-                // Blink RX LED as slcan rx if bus closed
-                if (can_get_bus_state() == BUS_CLOSED) led_blink_rxd();
-            }
-            else
-            {
-                // Accumulate chars to reassemble them into a line of command (terminated by a [CR])
-                cmd_line_buf[cmd_line_buf_idx++] = b;
-
-                // Check for command length
-                if (cmd_line_buf_idx == SLCAN_MTU)
-                {
-                    // Any incoming command longer than MTU (including a [CR]) is invalid.
-                    // Ensure a [BELL] will be returned when receiving a [CR].
-                    cmd_line_buf_idx = 0;                    // Clear the command and
-                    cmd_line_buf[cmd_line_buf_idx++] = '\a';    // ... mark as invalid (\a = [BELL])
-                }
+                // Any incoming command longer than MTU (including a [CR]) is invalid.
+                // Ensure a [BELL] will be returned when receiving a [CR].
+                cmd_line_buf_idx = 0;                    // Clear the command and
+                cmd_line_buf[cmd_line_buf_idx++] = '\a';    // ... mark as invalid (\a = [BELL])
             }
         }
-
-        // Move on to the next buffer
-        new_tail = (buf_cdc_rx.tail + 1) % BUF_CDC_RX_NUM_BUFS;
-        buf_disable_irq();
-        buf_cdc_rx.tail = new_tail;
-        buf_enable_irq();
     }
 
     // Process cdc transmit buffer
-    // buf_cdc_tx.head is referenced from interrupt, buf_cdc_tx.tail is modified in interrupt.
-    // buf_cdc_tx.head is modified in main loop, buf_cdc_tx.tail is modified in main loop.
-    // The head and tail are both 8-bit variable and atomic.
-    // No need for interrupt disabling for head but "memory" clobber and memory barrier would be safe against compiler optimizations and CPU reordering.
-    buf_disable_irq();
-    cpy_tail = buf_cdc_tx.tail;
-    buf_enable_irq();
+    // The head slot is filled by the application. Move on to the next slot when it has data.
     new_head = (buf_cdc_tx.head + 1) % BUF_CDC_TX_NUM_BUFS;
-    if (new_head != cpy_tail)
+    if (new_head != buf_cdc_tx.tail)
     {
         if (0 < buf_cdc_tx.msglen[buf_cdc_tx.head])
         {
-            buf_disable_irq();
             buf_cdc_tx.head = new_head;
-            buf_enable_irq();
             buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
         }
     }
-    // Critical section against "CDC_TransmitCplt_FS"
-	buf_disable_irq();
+    // Hand over the slot next to the tail to the CDC Tx FIFO when the FIFO can take the whole slot.
     new_tail = (buf_cdc_tx.tail + 1) % BUF_CDC_TX_NUM_BUFS;
     if (new_tail != buf_cdc_tx.head)
     {
-        if (CDC_Transmit_FS((uint8_t *)buf_cdc_tx.data[new_tail], buf_cdc_tx.msglen[new_tail]) == USBD_OK)
+        if (buf_cdc_tx.msglen[new_tail] <= tud_cdc_write_available())
         {
+            tud_cdc_write(buf_cdc_tx.data[new_tail], buf_cdc_tx.msglen[new_tail]);
+            tud_cdc_write_flush();
             buf_cdc_tx.tail = new_tail;
         }
     }
-    buf_enable_irq();
 
 
     // Process can transmit buffer.
@@ -274,7 +232,7 @@ uint8_t *buf_reserve_cdc_dest(uint16_t len)
     if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
         // Raise error since the caller will not call commit after they fail to reserve buffer.
-		gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
         return NULL;
     }
 
@@ -288,7 +246,7 @@ void buf_commit_cdc_dest(uint16_t len)
     if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
         // The data will not fit in the buffer.
-		gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
         return;
     }
 
@@ -326,7 +284,7 @@ uint8_t *buf_get_can_head_data(void)
 // the special case where the marker-search loop exits without iterating).
 // Does NOT raise an error: per buffer.c's reporting policy, this query is
 // neither a buffer-full condition nor a data-loss event in the buffer's
-// processing path — interpreting a NULL return is the caller's business.
+// processing path - interpreting a NULL return is the caller's business.
 uint8_t *buf_get_can_sent_data(uint8_t marker)
 {
     uint8_t idx = buf_can_tx.tail;
@@ -409,18 +367,4 @@ void buf_clear_can_buffer(void)
     buf_can_tx.tail = buf_can_tx.head;
     buf_can_tx.send = buf_can_tx.head;
     buf_can_tx.full = 0;
-}
-
-// Disable/Enable IRQ with memory barrier
-static void buf_disable_irq(void)
-{
-    __disable_irq();
-    __DSB(); // Data Synchronization Barrier
-    __ISB(); // Instruction Synchronization Barrier
-}
-static void buf_enable_irq(void)
-{
-    __enable_irq();
-    __DSB();
-    __ISB();
 }

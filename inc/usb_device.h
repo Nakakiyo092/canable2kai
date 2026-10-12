@@ -1,103 +1,25 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : usb_device.h
-  * @version        : v3.0_Cube
-  * @brief          : Header for usb_device.c file.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
 
-/* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __USB_DEVICE__H__
-#define __USB_DEVICE__H__
+// USB device initialization (tinyUSB)
 
-#ifdef __cplusplus
- extern "C" {
-#endif
+#ifndef USB_DEVICE_H
+#define USB_DEVICE_H
 
-/* Includes ------------------------------------------------------------------*/
-#include "stm32g4xx.h"
-#include "stm32g4xx_hal.h"
-#include "usbd_def.h"
-
-/* USER CODE BEGIN INCLUDE */
-
-/* USER CODE END INCLUDE */
-
-/** @addtogroup USBD_OTG_DRIVER
-  * @{
-  */
-
-/** @defgroup USBD_DEVICE USBD_DEVICE
-  * @brief Device file for Usb otg low level driver.
-  * @{
-  */
-
-/** @defgroup USBD_DEVICE_Exported_Variables USBD_DEVICE_Exported_Variables
-  * @brief Public variables.
-  * @{
-  */
-
-/* Private variables ---------------------------------------------------------*/
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
-/* USER CODE BEGIN PFP */
-
-/* USER CODE END PFP */
-
-/*
- * -- Insert your variables declaration here --
- */
-/* USER CODE BEGIN VARIABLES */
-
-/* USER CODE END VARIABLES */
-/**
-  * @}
-  */
-
-/** @defgroup USBD_DEVICE_Exported_FunctionsPrototype USBD_DEVICE_Exported_FunctionsPrototype
-  * @brief Declaration of public functions for Usb device.
-  * @{
-  */
-
-/** USB Device initialization function. */
 void MX_USB_Device_Init(void);
 
-/*
- * -- Insert functions declaration here --
- */
-/* USER CODE BEGIN FD */
-
-/* USER CODE END FD */
-/**
-  * @}
-  */
-
-/**
-  * @}
-  */
-
-/**
-  * @}
-  */
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* __USB_DEVICE__H__ */
-
+#endif // USB_DEVICE_H
