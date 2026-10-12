@@ -18,10 +18,17 @@
             "displayName": "CANable 2.0 (L2, STM32G431)",
             "inherits": "base",
             "cacheVariables": { "BOARD": "canable2" }
+        },
+        {
+            "name": "canable2-debug",
+            "displayName": "CANable 2.0 (L2, STM32G431), debug build",
+            "inherits": "canable2",
+            "cacheVariables": { "FW_DEBUG": "ON" }
         }
     ],
 
     "buildPresets": [
-        { "name": "canable2", "configurePreset": "canable2" }
+        { "name": "canable2", "configurePreset": "canable2" },
+        { "name": "canable2-debug", "configurePreset": "canable2-debug" }
     ]
 }

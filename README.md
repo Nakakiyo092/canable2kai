@@ -46,6 +46,14 @@ cmake --build --preset canable2
 
 The firmware is written to `build/canable2/` (`canable2.elf`, `canable2.bin`, `canable2.hex`, `canable2.map`).
 
+The test suite under `test/` uses debug-only commands (e.g. loopback modes) and requires a debug build.
+Use the `canable2-debug` preset for it. The firmware is written to `build/canable2-debug/`, and the `V` command returns a version string with `-DEBUG`.
+
+```bash
+cmake --preset canable2-debug
+cmake --build --preset canable2-debug
+```
+
 The former Makefile has been removed. The commands map as follows:
 
 | Former command | Command |
@@ -56,7 +64,17 @@ The former Makefile has been removed. The commands map as follows:
 
 ## Flashing with the Bootloader
 
-Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, run `cmake --build --preset canable2 --target upload` and your CANable will be updated to the firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, run the command below and your CANable will be updated to the firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+
+```bash
+cmake --build --preset canable2 --target upload
+```
+
+For the debug build, use the `canable2-debug` preset instead.
+
+```bash
+cmake --build --preset canable2-debug --target upload
+```
 
 On Linux, dfu-util needs permission to access the device (a udev rule, or running the command with `sudo`).
 

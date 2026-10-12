@@ -10,6 +10,9 @@ if(NOT BOARD STREQUAL "canable2")
         "Unsupported BOARD \"${BOARD}\". Configure with a preset (cmake --list-presets).")
 endif()
 
+# Debug build: enables the debug-only commands used by the test suite.
+option(FW_DEBUG "Enable debug-only commands (required by the tests)" OFF)
+
 set(FW_NAME ${BOARD})
 set(FW_OUT_BASE ${CMAKE_BINARY_DIR}/${FW_NAME})
 set(USB_DIR ${CMAKE_SOURCE_DIR}/lib/stm32_mw_usb_device)
@@ -67,6 +70,10 @@ add_custom_target(git_version
 )
 add_dependencies(${FW_NAME} git_version)
 target_compile_options(${FW_NAME} PRIVATE "SHELL:-include \"${GIT_VERSION_HEADER}\"")
+
+if(FW_DEBUG)
+    target_compile_definitions(${FW_NAME} PRIVATE DEBUG)
+endif()
 
 set(LD_SCRIPT ${CMAKE_SOURCE_DIR}/ldscripts/STM32G431CBTx_FLASH.ld)
 target_link_options(${FW_NAME} PRIVATE
