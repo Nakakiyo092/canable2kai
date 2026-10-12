@@ -7,9 +7,7 @@
 #include "can.h"
 #include "led.h"
 #include "tim.h"
-
-// Externs
-extern PCD_HandleTypeDef hpcd_USB_FS;
+#include "tusb.h"
 
 void NMI_Handler(void)
 {
@@ -57,12 +55,12 @@ void PendSV_Handler(void)
 // Handle USB interrupts
 void USB_LP_IRQHandler(void)
 {
-  HAL_PCD_IRQHandler(&hpcd_USB_FS);
+  tud_int_handler(0);
 }
 // Handle USB interrupts
 void USB_HP_IRQHandler(void)
 {
-  HAL_PCD_IRQHandler(&hpcd_USB_FS);
+  tud_int_handler(0);
 }
 
 // Handle TIM3 interrupt (timestamp base)

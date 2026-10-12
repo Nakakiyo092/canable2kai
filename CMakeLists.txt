@@ -15,10 +15,10 @@ option(FW_DEBUG "Enable debug-only commands (required by the tests)" OFF)
 
 set(FW_NAME ${BOARD})
 set(FW_OUT_BASE ${CMAKE_BINARY_DIR}/${FW_NAME})
-set(USB_DIR ${CMAKE_SOURCE_DIR}/lib/stm32_mw_usb_device)
+set(TINYUSB_DIR ${CMAKE_SOURCE_DIR}/lib/tinyusb/src)
 
 # Settings shared by the application and the libraries.
-# inc/ provides stm32g4xx_hal_conf.h and usbd_conf.h to the libraries.
+# inc/ provides stm32g4xx_hal_conf.h and tusb_config.h to the libraries.
 add_library(fw_config INTERFACE)
 target_compile_options(fw_config INTERFACE
     -Wall -g -ffunction-sections -fdata-sections -Os)
@@ -26,8 +26,7 @@ target_compile_definitions(fw_config INTERFACE
     STM32G431xx HSI48_VALUE=48000000 HSE_VALUE=16000000)
 target_include_directories(fw_config INTERFACE
     ${CMAKE_SOURCE_DIR}/inc
-    ${USB_DIR}/Core/Inc
-    ${USB_DIR}/Class/CDC/Inc)
+    ${TINYUSB_DIR})
 set(FW_CONFIG_TARGET fw_config)
 
 include(cmake/stm32g4.cmake)
@@ -42,10 +41,8 @@ add_executable(${FW_NAME}
     src/fdcan.c
     src/tim.c
     src/interrupts.c
-    src/usbd_conf.c
-    src/usbd_cdc_if.c
     src/usb_device.c
-    src/usbd_desc.c
+    src/usb_descriptors.c
     src/buffer.c
     src/can.c
     src/generator.c
@@ -53,10 +50,12 @@ add_executable(${FW_NAME}
     src/nvm.c
     src/parser.c
     src/startup_stm32g431xx.s
-    ${USB_DIR}/Core/Src/usbd_ctlreq.c
-    ${USB_DIR}/Core/Src/usbd_ioreq.c
-    ${USB_DIR}/Core/Src/usbd_core.c
-    ${USB_DIR}/Class/CDC/Src/usbd_cdc.c
+    ${TINYUSB_DIR}/tusb.c
+    ${TINYUSB_DIR}/common/tusb_fifo.c
+    ${TINYUSB_DIR}/device/usbd.c
+    ${TINYUSB_DIR}/class/cdc/cdc_device.c
+    ${TINYUSB_DIR}/portable/st/stm32_fsdev/dcd_stm32_fsdev.c
+    ${TINYUSB_DIR}/portable/st/stm32_fsdev/fsdev_common.c
 )
 
 # GIT_VERSION / GIT_REMOTE are regenerated at every build.
