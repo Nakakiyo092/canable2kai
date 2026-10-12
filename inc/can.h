@@ -32,6 +32,7 @@ enum CanBitrateNominal
     CAN_BITRATE_500K,
     CAN_BITRATE_800K,
     CAN_BITRATE_1000K,
+    CAN_BITRATE_83K,
 
     CAN_BITRATE_INVALID,
 };
