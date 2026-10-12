@@ -181,6 +181,7 @@ void SystemClock_Config(void)
 
   /** Configures CRS
   */
+  __HAL_RCC_CRS_CLK_ENABLE();
   RCC_CRSInitStruct.Prescaler = RCC_CRS_SYNC_DIV1;
   RCC_CRSInitStruct.Source = RCC_CRS_SYNC_SOURCE_USB;
   RCC_CRSInitStruct.Polarity = RCC_CRS_SYNC_POLARITY_RISING;
