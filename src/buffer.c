@@ -228,7 +228,7 @@ uint8_t *buf_reserve_cdc_dest(uint16_t len)
     if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
         // Raise error since the caller will not call commit after they fail to reserve buffer.
-		gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
         return NULL;
     }
 
@@ -242,7 +242,7 @@ void buf_commit_cdc_dest(uint16_t len)
     if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
         // The data will not fit in the buffer.
-		gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
         return;
     }
 
