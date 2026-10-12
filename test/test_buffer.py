@@ -40,11 +40,15 @@ class BufferTestCase(unittest.TestCase):
 
 
     def test_message_loss_in_cdc_rx_buffer(self):
-        """Verify the firmware's CDC Rx buffer overflow defence:
-        - the torn-prefix dropping in buf_process() prevents data loss from
-          producing a fabricated valid command, AND
-        - the overflow is reported via F bit 1 (SLCAN_STS_CAN_TX_FIFO_FULL,
-          mapped to CDC Rx side per doc/2.-Command-List.md).
+        """Verify the firmware's CDC Rx buffer overflow defence.
+        Depending on the project, the device handles CDC Rx overflow in
+        one of two ways:
+        - It discards data. The torn-prefix dropping prevents data loss from
+          producing a fabricated valid command, and the overflow is reported
+          via F bit 1 (SLCAN_STS_CAN_TX_FIFO_FULL, mapped to CDC Rx side per
+          doc/2.-Command-List.md).
+        - It holds off the host until it can accept more data. No data is
+          lost, every command is answered, and F bit 1 is not set.
 
         Method:
         Probe the device once with `I\\r` to capture this hardware's
@@ -60,7 +64,8 @@ class BufferTestCase(unittest.TestCase):
 
         Expected:
         rx contains only the deferred stall ACK (`\\r`) and a sequence of
-        `\\a` (BEL) replies. F bit 1 is set.
+        `\\a` (BEL) replies. Either F bit 1 is set, or all commands are
+        answered with `\\a`.
         """
         # Open internal loopback so the F command is available afterwards.
         self.dut.send(b"=\r")
@@ -73,9 +78,14 @@ class BufferTestCase(unittest.TestCase):
                         f"Unexpected shape for the I reply: {expected_reply!r}")
 
         # Stall 1000 ms (0x03E8) and flood `II\r` during the stall.
-        # 1500 * 3 = 4500 bytes >> CDC Rx ring (BUF_CDC_RX_NUM_BUFS * 64 ~= 512 B).
+        # 1500 * 3 = 4500 bytes, larger than the CDC Rx buffer of the device.
+        # The write may block while the device holds off the host.
+        num_cmds = 1500
+        write_timeout = self.dut.ser.write_timeout
+        self.dut.ser.write_timeout = 10
         self.dut.send(b"~03E8\r")
-        self.dut.ser.write(b"II\r" * 1500)
+        self.dut.ser.write(b"II\r" * num_cmds)
+        self.dut.ser.write_timeout = write_timeout
         time.sleep(1.5)
 
         rx_data = b""
@@ -108,8 +118,10 @@ class BufferTestCase(unittest.TestCase):
         self.assertEqual(len(f_reply), len(b"Fxx\r"),
                          f"Unexpected F reply length: {f_reply!r}")
         flags = int(f_reply[1:3], 16)
-        self.assertTrue(flags & 0x02,
-                        f"F bit 1 (CDC Rx overflow) is not raised, F={f_reply!r}")
+        if not flags & 0x02:
+            # No overflow reported: the device held off the host, so no command may be lost.
+            self.assertEqual(residue.count(b"\a"), num_cmds,
+                             f"F bit 1 (CDC Rx overflow) is not raised but commands are lost, F={f_reply!r}")
 
         self.dut.send(b"C\r")
         self.assertEqual(self.dut.receive(), b"\r")
