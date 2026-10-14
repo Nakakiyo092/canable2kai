@@ -23,7 +23,7 @@ add_library(fw_config INTERFACE)
 target_compile_options(fw_config INTERFACE
     -Wall -g -ffunction-sections -fdata-sections -Os)
 target_compile_definitions(fw_config INTERFACE
-    STM32G431xx HSI48_VALUE=48000000 HSE_VALUE=16000000)
+    STM32G431xx HSI48_VALUE=48000000)
 target_include_directories(fw_config INTERFACE
     ${CMAKE_SOURCE_DIR}/inc
     ${TINYUSB_DIR})
