@@ -17,7 +17,7 @@
 
 // Parse incoming slcan commands.
 
-#include <stdio.h>
+#include "printf/printf.h"
 #include <string.h>
 #include "stm32g4xx_hal.h"
 #include "buffer.h"
@@ -877,7 +877,7 @@ void psr_parse_str_number(uint8_t *buf, uint8_t len)
         if (numstr == NULL) return;
         if (nvm_get_serial_number(&serial) == HAL_OK)
         {
-            snprintf((char*)numstr, SLCAN_MTU - 1, "N%04X\r", serial);
+            snprintf_((char*)numstr, SLCAN_MTU - 1, "N%04X\r", serial);
             buf_commit_cdc_dest(6);
         }
         else
@@ -938,7 +938,7 @@ void psr_parse_str_status(uint8_t *buf, uint8_t len)
 
             struct CanErrorState err = can_get_error_state();
 
-            uint16_t written = (uint16_t)snprintf((char*)stsstr, SLCAN_MTU - 1, "f: node_sts=%s, last_err_code=%s, err_cnt_tx_rx=[0x%02X, 0x%02X], th_bus_load_percent=%02d\r",
+            uint16_t written = (uint16_t)snprintf_((char*)stsstr, SLCAN_MTU - 1, "f: node_sts=%s, last_err_code=%s, err_cnt_tx_rx=[0x%02X, 0x%02X], th_bus_load_percent=%02d\r",
                                         (err.bus_off ? "BUS_OFF" : (err.err_pssv ? "ER_PSSV" : "ER_ACTV")),
                                         (err.last_err_code == FDCAN_PROTOCOL_ERROR_NONE ? "NONE" :
                                         (err.last_err_code == FDCAN_PROTOCOL_ERROR_STUFF ? "STUF" :

@@ -16,6 +16,7 @@ option(FW_DEBUG "Enable debug-only commands (required by the tests)" OFF)
 set(FW_NAME ${BOARD})
 set(FW_OUT_BASE ${CMAKE_BINARY_DIR}/${FW_NAME})
 set(TINYUSB_DIR ${CMAKE_SOURCE_DIR}/lib/tinyusb/src)
+set(PRINTF_DIR ${CMAKE_SOURCE_DIR}/lib/printf/src)
 
 # Settings shared by the application and the libraries.
 # inc/ provides stm32g4xx_hal_conf.h and tusb_config.h to the libraries.
@@ -24,9 +25,22 @@ target_compile_options(fw_config INTERFACE
     -Wall -g -ffunction-sections -fdata-sections -Os)
 target_compile_definitions(fw_config INTERFACE
     STM32G431xx HSI48_VALUE=48000000)
+# printf: no aliasing of the standard names (call snprintf_() explicitly, so
+# that a missing include cannot silently fall back to newlib's stdio) and no
+# unused features.
+# These must be the same for printf.c and for the code including printf.h.
+target_compile_definitions(fw_config INTERFACE
+    PRINTF_ALIAS_STANDARD_FUNCTION_NAMES_SOFT=0
+    PRINTF_ALIAS_STANDARD_FUNCTION_NAMES_HARD=0
+    PRINTF_SUPPORT_DECIMAL_SPECIFIERS=0
+    PRINTF_SUPPORT_EXPONENTIAL_SPECIFIERS=0
+    PRINTF_SUPPORT_MSVC_STYLE_INTEGER_SPECIFIERS=0
+    PRINTF_SUPPORT_WRITEBACK_SPECIFIER=0
+    PRINTF_SUPPORT_LONG_LONG=0)
 target_include_directories(fw_config INTERFACE
     ${CMAKE_SOURCE_DIR}/inc
-    ${TINYUSB_DIR})
+    ${TINYUSB_DIR}
+    ${PRINTF_DIR})
 set(FW_CONFIG_TARGET fw_config)
 
 include(cmake/stm32g4.cmake)
@@ -56,6 +70,7 @@ add_executable(${FW_NAME}
     ${TINYUSB_DIR}/class/cdc/cdc_device.c
     ${TINYUSB_DIR}/portable/st/stm32_fsdev/dcd_stm32_fsdev.c
     ${TINYUSB_DIR}/portable/st/stm32_fsdev/fsdev_common.c
+    ${PRINTF_DIR}/printf/printf.c
 )
 
 # GIT_VERSION / GIT_REMOTE are regenerated at every build.
