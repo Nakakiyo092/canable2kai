@@ -441,12 +441,11 @@ HAL_StatusTypeDef can_set_nominal_bitrate(enum CanBitrateNominal bitrate)
         return HAL_ERROR;
     }
 
-    // Set default bitrate 125kbps at 87.5% sampling point
-    // Equivalent to sxxyy command with BTR0=0x03, BTR1=0x1C
+    // Set default bitrate 125kbps at 80% sampling point (80 tq per bit)
     can_bit_cfg_nominal.prescaler = 8;
-    can_bit_cfg_nominal.sjw = 5;
-    can_bit_cfg_nominal.time_seg1 = 69;
-    can_bit_cfg_nominal.time_seg2 = 10;
+    can_bit_cfg_nominal.sjw = 16;
+    can_bit_cfg_nominal.time_seg1 = 63;
+    can_bit_cfg_nominal.time_seg2 = 16;
 
     switch (bitrate)
     {
@@ -471,12 +470,11 @@ HAL_StatusTypeDef can_set_nominal_bitrate(enum CanBitrateNominal bitrate)
         can_bit_cfg_nominal.prescaler = 2;
         break;
     case CAN_BITRATE_800K:
-        // 87.5% is not achievable at 800kbps with 80MHz clock;
-        // use 87% (prescaler=1, N=100, SP=87/100) as the closest value.
+        // 100 tq per bit
         can_bit_cfg_nominal.prescaler = 1;
-        can_bit_cfg_nominal.sjw = 7;
-        can_bit_cfg_nominal.time_seg1 = 86;
-        can_bit_cfg_nominal.time_seg2 = 13;
+        can_bit_cfg_nominal.sjw = 20;
+        can_bit_cfg_nominal.time_seg1 = 79;
+        can_bit_cfg_nominal.time_seg2 = 20;
         break;
     case CAN_BITRATE_1000K:
         can_bit_cfg_nominal.prescaler = 1;
@@ -500,33 +498,31 @@ HAL_StatusTypeDef can_set_data_bitrate(enum CanBitrateData bitrate)
         return HAL_ERROR;
     }
 
-    // Set default bitrate 2M
-    can_bit_cfg_data.prescaler = 1;
-    can_bit_cfg_data.sjw = 8;
-    can_bit_cfg_data.time_seg1 = 30;
-    can_bit_cfg_data.time_seg2 = 9;
+    // Set default bitrate 2M at 50% sampling point (20 tq per bit)
+    can_bit_cfg_data.prescaler = 2;
+    can_bit_cfg_data.sjw = 9;
+    can_bit_cfg_data.time_seg1 = 9;
+    can_bit_cfg_data.time_seg2 = 10;
 
     switch (bitrate)
     {
     case CAN_DATA_BITRATE_500K:
-        can_bit_cfg_data.prescaler = 4;
+        can_bit_cfg_data.prescaler = 8;
         break;
     case CAN_DATA_BITRATE_1M:
-        can_bit_cfg_data.prescaler = 2;
+        can_bit_cfg_data.prescaler = 4;
         break;
     case CAN_DATA_BITRATE_2M:
         break;
     case CAN_DATA_BITRATE_4M:
         can_bit_cfg_data.prescaler = 1;
-        can_bit_cfg_data.sjw = 4;
-        can_bit_cfg_data.time_seg1 = 14;
-        can_bit_cfg_data.time_seg2 = 5;
         break;
     case CAN_DATA_BITRATE_5M:
+        // 16 tq per bit
         can_bit_cfg_data.prescaler = 1;
-        can_bit_cfg_data.sjw = 3;
-        can_bit_cfg_data.time_seg1 = 11;
-        can_bit_cfg_data.time_seg2 = 4;
+        can_bit_cfg_data.sjw = 7;
+        can_bit_cfg_data.time_seg1 = 7;
+        can_bit_cfg_data.time_seg2 = 8;
         break;
     default:
         return HAL_ERROR;
