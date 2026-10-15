@@ -15,13 +15,12 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
-  * All rights reserved.</center></h2>
+  * Copyright (c) 2019 STMicroelectronics.
+  * All rights reserved.
   *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
@@ -63,6 +62,9 @@ Reset_Handler:
   ldr   r0, =_estack
   mov   sp, r0          /* set stack pointer */
 
+/* Call the clock system initialization function.*/
+    bl  SystemInit
+
 /* Copy the data segment initializers from flash to SRAM */
   ldr r0, =_sdata
   ldr r1, =_edata
@@ -94,8 +96,7 @@ LoopFillZerobss:
   cmp r2, r4
   bcc FillZerobss
 
-/* Call the clock system intitialization function.*/
-    bl  SystemInit
+
 /* Call static constructors */
     bl __libc_init_array
 /* Call the application's entry point.*/
@@ -128,7 +129,6 @@ Infinite_Loop:
 ******************************************************************************/
  	.section	.isr_vector,"a",%progbits
 	.type	g_pfnVectors, %object
-	.size	g_pfnVectors, .-g_pfnVectors
 
 
 g_pfnVectors:
@@ -169,8 +169,8 @@ g_pfnVectors:
 	.word	ADC1_2_IRQHandler
 	.word	USB_HP_IRQHandler
 	.word	USB_LP_IRQHandler
-	.word	0
-	.word	0
+	.word	FDCAN1_IT0_IRQHandler
+	.word	FDCAN1_IT1_IRQHandler
 	.word	EXTI9_5_IRQHandler
 	.word	TIM1_BRK_TIM15_IRQHandler
 	.word	TIM1_UP_TIM16_IRQHandler
@@ -234,10 +234,10 @@ g_pfnVectors:
 	.word	I2C4_ER_IRQHandler
 	.word	SPI4_IRQHandler
 	.word	AES_IRQHandler
-	.word	0
-	.word	0
-	.word	0
-	.word	0
+	.word	FDCAN2_IT0_IRQHandler
+	.word	FDCAN2_IT1_IRQHandler
+	.word	FDCAN3_IT0_IRQHandler
+	.word	FDCAN3_IT1_IRQHandler
 	.word	RNG_IRQHandler
 	.word	LPUART1_IRQHandler
 	.word	I2C3_EV_IRQHandler
@@ -250,6 +250,8 @@ g_pfnVectors:
 	.word	DMA2_Channel8_IRQHandler
 	.word	CORDIC_IRQHandler
 	.word	FMAC_IRQHandler
+
+	.size	g_pfnVectors, .-g_pfnVectors
 
 /*******************************************************************************
 *
@@ -348,6 +350,12 @@ g_pfnVectors:
 
 	.weak	USB_LP_IRQHandler
 	.thumb_set USB_LP_IRQHandler,Default_Handler
+
+	.weak	FDCAN1_IT0_IRQHandler
+	.thumb_set FDCAN1_IT0_IRQHandler,Default_Handler
+
+	.weak	FDCAN1_IT1_IRQHandler
+	.thumb_set FDCAN1_IT1_IRQHandler,Default_Handler
 
 	.weak	EXTI9_5_IRQHandler
 	.thumb_set EXTI9_5_IRQHandler,Default_Handler
@@ -514,6 +522,17 @@ g_pfnVectors:
 	.weak	AES_IRQHandler
 	.thumb_set AES_IRQHandler,Default_Handler
 
+	.weak	FDCAN2_IT0_IRQHandler
+	.thumb_set FDCAN2_IT0_IRQHandler,Default_Handler
+
+	.weak	FDCAN2_IT1_IRQHandler
+	.thumb_set FDCAN2_IT1_IRQHandler,Default_Handler
+
+	.weak	FDCAN3_IT0_IRQHandler
+	.thumb_set FDCAN3_IT0_IRQHandler,Default_Handler
+
+	.weak	FDCAN3_IT1_IRQHandler
+	.thumb_set FDCAN3_IT1_IRQHandler,Default_Handler
 
 	.weak	RNG_IRQHandler
 	.thumb_set RNG_IRQHandler,Default_Handler
@@ -551,4 +570,3 @@ g_pfnVectors:
 	.weak	FMAC_IRQHandler
 	.thumb_set FMAC_IRQHandler,Default_Handler
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

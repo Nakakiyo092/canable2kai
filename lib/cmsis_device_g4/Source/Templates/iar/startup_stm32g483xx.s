@@ -15,14 +15,13 @@
 ;********************************************************************************
 ;* @attention
 ;*
-;* <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
-;* All rights reserved.</center></h2>
+;* Copyright (c) 2019 STMicroelectronics.
+;* All rights reserved.
 ;*
-;* This software component is licensed by ST under BSD 3-Clause license,
-;* the "License"; You may not use this file except in compliance with the
-;* License. You may obtain a copy of the License at:
-;*                        opensource.org/licenses/BSD-3-Clause
-;*
+;* This software is licensed under terms that can be found in the LICENSE file
+;* in the root directory of this software component.
+;* If no LICENSE file comes with this software, it is provided AS-IS.
+;
 ;*******************************************************************************
 ;
 ;
@@ -94,8 +93,8 @@ __vector_table
         DCD     ADC1_2_IRQHandler                 ; ADC1 and ADC2
         DCD     USB_HP_IRQHandler                 ; USB Device High Priority
         DCD     USB_LP_IRQHandler                 ; USB Device Low Priority
-        DCD     0                                 ; Reserved
-        DCD     0                                 ; Reserved
+        DCD     FDCAN1_IT0_IRQHandler             ; FDCAN1 interrupt line 0
+        DCD     FDCAN1_IT1_IRQHandler             ; FDCAN1 interrupt line 1
         DCD     EXTI9_5_IRQHandler                ; External Line[9:5]s
         DCD     TIM1_BRK_TIM15_IRQHandler         ; TIM1 Break, Transition error, Index error and TIM15
         DCD     TIM1_UP_TIM16_IRQHandler          ; TIM1 Update and TIM16
@@ -158,11 +157,11 @@ __vector_table
         DCD     I2C4_EV_IRQHandler                ; I2C4 event
         DCD     I2C4_ER_IRQHandler                ; I2C4 error
         DCD     SPI4_IRQHandler                   ; SPI4
-        DCD     AES_IRQHandler                    ; AES global interrupt        DCD     0                                 ; Reserved
-        DCD     0                                 ; Reserved
-        DCD     0                                 ; Reserved
-        DCD     0                                 ; Reserved
-        DCD     0                                 ; Reserved
+        DCD     AES_IRQHandler                    ; AES global interrupt
+        DCD     FDCAN2_IT0_IRQHandler             ; FDCAN2 interrupt line 0
+        DCD     FDCAN2_IT1_IRQHandler             ; FDCAN2 interrupt line 1
+        DCD     FDCAN3_IT0_IRQHandler             ; FDCAN3 interrupt line 0
+        DCD     FDCAN3_IT1_IRQHandler             ; FDCAN3 interrupt line 1
         DCD     RNG_IRQHandler                    ; RNG global interrupt
         DCD     LPUART1_IRQHandler                ; LP UART 1 interrupt
         DCD     I2C3_EV_IRQHandler                ; I2C3 Event
@@ -338,6 +337,16 @@ USB_HP_IRQHandler
         SECTION .text:CODE:NOROOT:REORDER(1)
 USB_LP_IRQHandler
         B USB_LP_IRQHandler
+
+        PUBWEAK FDCAN1_IT0_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN1_IT0_IRQHandler
+        B FDCAN1_IT0_IRQHandler
+
+        PUBWEAK FDCAN1_IT1_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN1_IT1_IRQHandler
+        B FDCAN1_IT1_IRQHandler
 
         PUBWEAK EXTI9_5_IRQHandler
         SECTION .text:CODE:NOROOT:REORDER(1)
@@ -614,6 +623,26 @@ SPI4_IRQHandler
 AES_IRQHandler
         B AES_IRQHandler
 
+        PUBWEAK FDCAN2_IT0_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN2_IT0_IRQHandler
+        B FDCAN2_IT0_IRQHandler
+
+        PUBWEAK FDCAN2_IT1_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN2_IT1_IRQHandler
+        B FDCAN2_IT1_IRQHandler
+
+        PUBWEAK FDCAN3_IT0_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN3_IT0_IRQHandler
+        B FDCAN3_IT0_IRQHandler
+
+        PUBWEAK FDCAN3_IT1_IRQHandler
+        SECTION .text:CODE:NOROOT:REORDER(1)
+FDCAN3_IT1_IRQHandler
+        B FDCAN3_IT1_IRQHandler
+
         PUBWEAK RNG_IRQHandler
         SECTION .text:CODE:NOROOT:REORDER(1)
 RNG_IRQHandler
@@ -675,4 +704,3 @@ FMAC_IRQHandler
         B FMAC_IRQHandler
 
         END
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
