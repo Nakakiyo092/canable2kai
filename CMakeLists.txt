@@ -25,6 +25,11 @@ target_compile_options(fw_config INTERFACE
     -Wall -g -ffunction-sections -fdata-sections -Os)
 target_compile_definitions(fw_config INTERFACE
     STM32G431xx HSI48_VALUE=48000000)
+# SystemInit() sets SCB->VTOR to the flash vector table only with this
+# definition. Without it, VTOR is left as is, which is the system memory when
+# the firmware is started by the ROM bootloader (e.g. dfu-util :leave).
+target_compile_definitions(fw_config INTERFACE
+    USER_VECT_TAB_ADDRESS)
 # printf: no aliasing of the standard names (call snprintf_() explicitly, so
 # that a missing include cannot silently fall back to newlib's stdio) and no
 # unused features.

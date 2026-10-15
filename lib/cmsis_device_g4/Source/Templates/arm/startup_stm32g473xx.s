@@ -16,14 +16,13 @@
 ;********************************************************************************
 ;* @attention
 ;*
-;* <h2><center>&copy; Copyright (c) 2019 STMicroelectronics.
-;* All rights reserved.</center></h2>
+;* Copyright (c) 2019 STMicroelectronics.
+;* All rights reserved.
 ;*
-;* This software component is licensed by ST under BSD 3-Clause license,
-;* the "License"; You may not use this file except in compliance with the
-;* License. You may obtain a copy of the License at:
-;*                        opensource.org/licenses/BSD-3-Clause
-;*
+;* This software is licensed under terms that can be found in the LICENSE file
+;* in the root directory of this software component.
+;* If no LICENSE file comes with this software, it is provided AS-IS.
+;
 ;*******************************************************************************
 ;* <<< Use Configuration Wizard in Context Menu >>>
 ;
@@ -100,8 +99,8 @@ __Vectors       DCD     __initial_sp               ; Top of Stack
                 DCD     ADC1_2_IRQHandler                 ; ADC1 and ADC2
                 DCD     USB_HP_IRQHandler                 ; USB Device High Priority
                 DCD     USB_LP_IRQHandler                 ; USB Device Low Priority
-                DCD     0                                 ; Reserved
-                DCD     0                                 ; Reserved
+                DCD     FDCAN1_IT0_IRQHandler             ; FDCAN1 interrupt line 0
+                DCD     FDCAN1_IT1_IRQHandler             ; FDCAN1 interrupt line 1
                 DCD     EXTI9_5_IRQHandler                ; External Line[9:5]s
                 DCD     TIM1_BRK_TIM15_IRQHandler         ; TIM1 Break, Transition error, Index error and TIM15
                 DCD     TIM1_UP_TIM16_IRQHandler          ; TIM1 Update and TIM16
@@ -165,10 +164,10 @@ __Vectors       DCD     __initial_sp               ; Top of Stack
                 DCD     I2C4_ER_IRQHandler                ; I2C4 error
                 DCD     SPI4_IRQHandler                   ; SPI4
                 DCD     0                                 ; Reserved
-                DCD     0                                 ; Reserved
-                DCD     0                                 ; Reserved
-                DCD     0                                 ; Reserved
-                DCD     0                                 ; Reserved
+                DCD     FDCAN2_IT0_IRQHandler             ; FDCAN2 interrupt line 0
+                DCD     FDCAN2_IT1_IRQHandler             ; FDCAN2 interrupt line 1
+                DCD     FDCAN3_IT0_IRQHandler             ; FDCAN3 interrupt line 0
+                DCD     FDCAN3_IT1_IRQHandler             ; FDCAN3 interrupt line 1
                 DCD     RNG_IRQHandler                    ; RNG global interrupt
                 DCD     LPUART1_IRQHandler                ; LP UART 1 interrupt
                 DCD     I2C3_EV_IRQHandler                ; I2C3 Event
@@ -267,6 +266,8 @@ Default_Handler PROC
         EXPORT     ADC1_2_IRQHandler                 [WEAK]
         EXPORT     USB_HP_IRQHandler                 [WEAK]
         EXPORT     USB_LP_IRQHandler                 [WEAK]
+        EXPORT     FDCAN1_IT0_IRQHandler             [WEAK]
+        EXPORT     FDCAN1_IT1_IRQHandler             [WEAK]
         EXPORT     EXTI9_5_IRQHandler                [WEAK]
         EXPORT     TIM1_BRK_TIM15_IRQHandler         [WEAK]
         EXPORT     TIM1_UP_TIM16_IRQHandler          [WEAK]
@@ -321,6 +322,10 @@ Default_Handler PROC
         EXPORT     I2C4_EV_IRQHandler                [WEAK]
         EXPORT     I2C4_ER_IRQHandler                [WEAK]
         EXPORT     SPI4_IRQHandler                   [WEAK]
+        EXPORT     FDCAN2_IT0_IRQHandler             [WEAK]
+        EXPORT     FDCAN2_IT1_IRQHandler             [WEAK]
+        EXPORT     FDCAN3_IT0_IRQHandler             [WEAK]
+        EXPORT     FDCAN3_IT1_IRQHandler             [WEAK]
         EXPORT     RNG_IRQHandler                    [WEAK]
         EXPORT     LPUART1_IRQHandler                [WEAK]
         EXPORT     I2C3_EV_IRQHandler                [WEAK]
@@ -355,6 +360,8 @@ DMA1_Channel7_IRQHandler
 ADC1_2_IRQHandler
 USB_HP_IRQHandler
 USB_LP_IRQHandler
+FDCAN1_IT0_IRQHandler
+FDCAN1_IT1_IRQHandler
 EXTI9_5_IRQHandler
 TIM1_BRK_TIM15_IRQHandler
 TIM1_UP_TIM16_IRQHandler
@@ -409,6 +416,10 @@ FPU_IRQHandler
 I2C4_EV_IRQHandler
 I2C4_ER_IRQHandler
 SPI4_IRQHandler
+FDCAN2_IT0_IRQHandler
+FDCAN2_IT1_IRQHandler
+FDCAN3_IT0_IRQHandler
+FDCAN3_IT1_IRQHandler
 RNG_IRQHandler
 LPUART1_IRQHandler
 I2C3_EV_IRQHandler
@@ -456,4 +467,3 @@ __user_initial_stackheap
 
                  END
 
-;************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE*****

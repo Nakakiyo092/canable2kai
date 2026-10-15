@@ -20,5 +20,7 @@ target_include_directories(stm32g4_cpu INTERFACE
 
 file(GLOB STM32G4_HAL_SOURCES CONFIGURE_DEPENDS
     ${STM32G4_LIB_DIR}/stm32g4xx_hal_driver/Src/*.c)
+# *_template.c are examples to be copied into an application, not part of the HAL.
+list(FILTER STM32G4_HAL_SOURCES EXCLUDE REGEX "_template\\.c$")
 add_library(stm32g4xx_hal STATIC ${STM32G4_HAL_SOURCES})
 target_link_libraries(stm32g4xx_hal PUBLIC stm32g4_cpu ${FW_CONFIG_TARGET})
