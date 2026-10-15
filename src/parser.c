@@ -1054,29 +1054,11 @@ static void psr_parse_str_ext_tdc(uint8_t *buf, uint8_t len)
     if (len == 4)
     {
         struct CanTdcLiveState s = can_get_tdc_state();
-        // "!: TDCV=0xXX, TDCO=0xXX, TDCF=0xXX, EN=X\r"
-        uint8_t out[41];
-        uint8_t i = 0;
-        out[i++] = '!'; out[i++] = ':'; out[i++] = ' ';
-        out[i++] = 'T'; out[i++] = 'D'; out[i++] = 'C'; out[i++] = 'V'; out[i++] = '=';
-        out[i++] = '0'; out[i++] = 'x';
-        out[i++] = gen_nibble_to_ascii[(s.tdcv >> 4) & 0xF];
-        out[i++] = gen_nibble_to_ascii[s.tdcv & 0xF];
-        out[i++] = ','; out[i++] = ' ';
-        out[i++] = 'T'; out[i++] = 'D'; out[i++] = 'C'; out[i++] = 'O'; out[i++] = '=';
-        out[i++] = '0'; out[i++] = 'x';
-        out[i++] = gen_nibble_to_ascii[(s.tdco >> 4) & 0xF];
-        out[i++] = gen_nibble_to_ascii[s.tdco & 0xF];
-        out[i++] = ','; out[i++] = ' ';
-        out[i++] = 'T'; out[i++] = 'D'; out[i++] = 'C'; out[i++] = 'F'; out[i++] = '=';
-        out[i++] = '0'; out[i++] = 'x';
-        out[i++] = gen_nibble_to_ascii[(s.tdcf >> 4) & 0xF];
-        out[i++] = gen_nibble_to_ascii[s.tdcf & 0xF];
-        out[i++] = ','; out[i++] = ' ';
-        out[i++] = 'E'; out[i++] = 'N'; out[i++] = '=';
-        out[i++] = s.enabled ? '1' : '0';
-        out[i++] = '\r';
-        buf_enqueue_cdc(out, i);
+        // "!: TDCV=0xXX, TDCO=0xXX, TDCF=0xXX, EN=X\r" (fixed length: 41)
+        char out[41 + 1];   // + NUL written by snprintf_
+        snprintf_(out, sizeof(out), "!: TDCV=0x%02X, TDCO=0x%02X, TDCF=0x%02X, EN=%u\r",
+                  s.tdcv, s.tdco, s.tdcf, s.enabled ? 1U : 0U);
+        buf_enqueue_cdc((uint8_t *)out, 41);
         return;
     }
 
