@@ -9,6 +9,7 @@ To update a library, overwrite its directory in place so that the diff shows the
 | `cmsis_device_g4` | [STMicroelectronics/cmsis_device_g4](https://github.com/STMicroelectronics/cmsis_device_g4) | V1.1.0 | BSD-3-Clause | 2021-03-08 |
 | `stm32g4xx_hal_driver` | [STMicroelectronics/stm32g4xx_hal_driver](https://github.com/STMicroelectronics/stm32g4xx_hal_driver) | V1.1.0 | BSD-3-Clause | 2021-03-08 |
 | `tinyusb` | [hathach/tinyusb_src](https://github.com/hathach/tinyusb_src) | 0.21.0 | MIT | 2026-10-12 |
+| `printf` | [eyalroz/printf](https://github.com/eyalroz/printf) | v6.4.0 | MIT | 2026-10-15 |
 
 The Arm and ST libraries were imported as bundled with STM32CubeG4 V1.1.0.
 Licenses are as stated in the file headers of the imported versions.
@@ -33,4 +34,10 @@ No modifications.
 ### tinyusb
 
 Imported from the sources-only mirror of [hathach/tinyusb](https://github.com/hathach/tinyusb) (`src/` and `LICENSE`).
+No modifications.
+
+### printf
+
+Only `src/printf/` and `LICENSE` are kept.
+The build configuration (`CMakeLists.txt`, `printf_config.h.in`) and the tests are not included; the options are set as preprocessor definitions in the top-level `CMakeLists.txt`.
 No modifications.
