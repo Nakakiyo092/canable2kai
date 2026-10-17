@@ -1,5 +1,9 @@
 # CANable2-Kai
 
+CAN is a network that lets the controllers inside machines, mostly vehicles, communicate with each other, for example the ones controlling the engine, brakes, airbags and dashboard.
+This firmware runs on a small USB adapter that connects a PC to such a network.
+It is used to watch, record and send messages when developing, testing or diagnosing these systems.
+
 This repository contains sources for the slcan CANable 2.0 firmware. This firmware implements non-standard commands to support CANFD messaging (beta) alongside a LAWICEL-style command set.
 
 URL to this repository: https://github.com/Nakakiyo092/canable2kai
@@ -43,11 +47,14 @@ The build environment is intended for Linux, especially Ubuntu 24.04 or later.
 - GNU Arm Embedded Toolchain
 - dfu-util
 
-The toolchain binaries must be in your PATH. On Ubuntu, the required tools can be installed with:
+On Ubuntu, the required tools can be installed with:
 
 ```bash
 sudo apt install git cmake ninja-build gcc-arm-none-eabi dfu-util
 ```
+
+The build calls the tools from PATH. The tools installed with apt are already in PATH.
+If you install the toolchain in another way (e.g. from an archive), add its `bin` directory to PATH.
 
 ### How to build firmware
 
