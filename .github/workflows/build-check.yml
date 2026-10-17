@@ -1,0 +1,51 @@
+name: Build check
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Checks that the firmware builds. Binaries are never published automatically:
+# no artifacts are uploaded. Publishing is a manual step after a license review.
+jobs:
+  build-check:
+    name: Build check (${{ matrix.preset }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [canable2, canable2-debug]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0          # git describe needs the tags
+
+      # Same command as the Dependencies section of README.md
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt install -y gcc-arm-none-eabi cmake ninja-build dfu-util git
+          arm-none-eabi-gcc --version | head -n 1
+          cmake --version | head -n 1
+
+      # Same commands as the Building section of README.md,
+      # with compiler warnings treated as errors
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          cmake --build --preset ${{ matrix.preset }}
+
+      - name: Report size
+        run: |
+          echo '### ${{ matrix.preset }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          arm-none-eabi-size build/${{ matrix.preset }}/canable2.elf >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

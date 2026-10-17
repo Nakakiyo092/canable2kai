@@ -1,41 +1,93 @@
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
 //
-// buffer: manage buffer
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 //
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
 
-#include "usbd_cdc_if.h"
+// Manage cdc (rx and tx) and can (tx) buffer (including error handling related to data loss in buffer)
+
+#include <string.h>
+#include "tusb.h"
 #include "buffer.h"
-#include "error.h"
-#include "slcan.h"
-#include "system.h"
+#include "can.h"
+#include "led.h"
+#include "parser.h"
+
+// CDC transmit buffering
+#define BUF_CDC_TX_NUM_BUFS             3U      // Should be >= 3 (triple buffering) to avoid dead lock
+#define BUF_CDC_TX_BUF_SIZE             4096U   // Set to 64 * 64 for max single packet size
+
+// Bytes read from the CDC Rx FIFO per call of buf_process (one full-speed packet)
+#define BUF_CDC_RX_CHUNK_SIZE           64U
+
+// CAN transmit buffering
+#define BUF_CAN_TXQUEUE_LEN             64U     // Number of buffers allocated
+
+// APP FIFO release pacing - bound on (send - tail) before forced release.
+//
+// Worst case: a burst of successes followed by all-failure pushes while
+// the HAL TEF drains.
+//   loop 1: push 3 frames, all succeed -> 3 events fill HAL TEF
+//   loops 2-4: push 3 frames each, all fail; process 1 event per loop
+//   After loop 4: send=12, tail=3, nbr_sent_frames = TFQ * TEF = 9
+//
+// Other shapes stay below this peak:
+//   - All-failure runs: TEF stays empty, growth is capped by buf_release_can_tail().
+//   - Mixed runs: each released success drags older failed entries along, so
+//     (send - tail) shrinks instead of drifting up.
+//
+// (3 * 3 * 2) = TFQ * TEF * Margin = 18 - 2x the worst case in case the
+// pattern repeats, and well below BUF_CAN_TXQUEUE_LEN (64) so genuine
+// overflow remains observable.
+// See also: https://github.com/Nakakiyo092/usb2canfdv1/issues/49
+#define BUF_MAX_NBR_SENT_FRAMES         (3 * 3 * 2)
+
+// A CDC Tx slot is handed over to the CDC Tx FIFO of tinyUSB at once
+_Static_assert(CFG_TUD_CDC_TX_BUFSIZE >= BUF_CDC_TX_BUF_SIZE, "CDC Tx FIFO must hold a whole CDC Tx slot");
+
+// Transmit buffering: circular FIFO buffer
+struct BufCdcTx
+{
+    uint8_t data[BUF_CDC_TX_NUM_BUFS][BUF_CDC_TX_BUF_SIZE];
+    uint32_t msglen[BUF_CDC_TX_NUM_BUFS];
+    uint8_t head;
+    uint8_t tail;
+};
 
 // Cirbuf structure for CAN TX frames
-struct buf_can_tx
+struct BufCanTx
 {
     FDCAN_TxHeaderTypeDef header[BUF_CAN_TXQUEUE_LEN];  // Header buffer
     uint8_t data[BUF_CAN_TXQUEUE_LEN][CAN_MAX_DATALEN]; // Data buffer
-    uint16_t head;                              // Head pointer
-    uint16_t send;                              // Send pointer
-    uint16_t tail;                              // Tail pointer
-    uint8_t full;                               // Set this when we are full, clear when the tail moves one.
+    uint16_t head;                              // Head index
+    uint16_t send;                              // Send index
+    uint16_t tail;                              // Tail index
+    uint8_t full;                               // Set this when it is full, clear when the tail moves one.
 };
 
-// Public variables
-volatile struct buf_cdc_tx buf_cdc_tx = {0};
-volatile struct buf_cdc_rx buf_cdc_rx = {0};
-
 // Private variables
-static struct buf_can_tx buf_can_tx = {0};
-static uint8_t slcan_str[SLCAN_MTU];
-static uint8_t slcan_str_index = 0;
+static struct BufCdcTx buf_cdc_tx = {0};
+static struct BufCanTx buf_can_tx = {0};
+static uint8_t cmd_line_buf[SLCAN_MTU];          // Command line buffer
+static uint8_t cmd_line_buf_idx = 0;
 
 // Private prototypes
+static HAL_StatusTypeDef buf_release_can_tail(void);
 
 // Initializes
 void buf_init(void)
 {
-    buf_cdc_rx.head = 0;
-    buf_cdc_rx.tail = 0;
-
     buf_cdc_tx.head = 1;
     buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
     buf_cdc_tx.tail = 0;
@@ -45,109 +97,142 @@ void buf_init(void)
     buf_can_tx.send = 0;
     buf_can_tx.tail = 0;
     buf_can_tx.full = 0;
+
+    cmd_line_buf_idx = 0;
 }
 
 // Process
 void buf_process(void)
 {
-    // Process cdc receive buffer
-    system_irq_disable();
-    uint32_t tmp_head = buf_cdc_rx.head;
-    system_irq_enable();
-    if (buf_cdc_rx.tail != tmp_head)
-    {
-        //  Process one whole buffer
-        for (uint32_t i = 0; i < buf_cdc_rx.msglen[buf_cdc_rx.tail]; i++)
-	    {
-            if (buf_cdc_rx.data[buf_cdc_rx.tail][i] == '\r')
-            {
-                slcan_parse_str(slcan_str, slcan_str_index);
-                slcan_str_index = 0;
-            }
-            else
-            {
-                // Check for overflow of buffer
-                if (slcan_str_index >= SLCAN_MTU)
-                {
-                    // TODO: Return here and discard this CDC buffer?
-                    slcan_str_index = 0;
-                }
+    uint32_t new_head, new_tail;
 
-                slcan_str[slcan_str_index++] = buf_cdc_rx.data[buf_cdc_rx.tail][i];
+    // Process cdc receive data
+    // The CDC Rx and Tx FIFOs of tinyUSB are accessed only in the main loop (tud_task() and this function).
+    // When the Rx FIFO is full, tinyUSB stops accepting packets from the host instead of dropping data.
+    uint8_t rx_data[BUF_CDC_RX_CHUNK_SIZE];
+    uint32_t rx_len = tud_cdc_read(rx_data, sizeof(rx_data));
+    for (uint32_t i = 0; i < rx_len; i++)
+    {
+        uint8_t b = rx_data[i];
+
+        if (b == '\r')    // \r = [CR] = delimiter
+        {
+            psr_parse_str(cmd_line_buf, cmd_line_buf_idx);
+            cmd_line_buf_idx = 0;
+
+            // Blink RX LED as slcan rx if bus closed
+            if (can_get_bus_state() == BUS_CLOSED) led_blink_rxd();
+        }
+        else
+        {
+            // Accumulate chars to reassemble them into a line of command (terminated by a [CR])
+            cmd_line_buf[cmd_line_buf_idx++] = b;
+
+            // Check for command length
+            if (cmd_line_buf_idx == SLCAN_MTU)
+            {
+                // Any incoming command longer than MTU (including a [CR]) is invalid.
+                // Ensure a [BELL] will be returned when receiving a [CR].
+                cmd_line_buf_idx = 0;                    // Clear the command and
+                cmd_line_buf[cmd_line_buf_idx++] = '\a';    // ... mark as invalid (\a = [BELL])
             }
         }
-
-        // Move on to next buffer
-        system_irq_disable();
-        buf_cdc_rx.tail = (buf_cdc_rx.tail + 1) % BUF_CDC_RX_NUM_BUFS;
-        system_irq_enable();
     }
 
     // Process cdc transmit buffer
-    uint32_t new_head = (buf_cdc_tx.head + 1UL) % BUF_CDC_TX_NUM_BUFS;
+    // The head slot is filled by the application. Move on to the next slot when it has data.
+    new_head = (buf_cdc_tx.head + 1) % BUF_CDC_TX_NUM_BUFS;
     if (new_head != buf_cdc_tx.tail)
     {
         if (0 < buf_cdc_tx.msglen[buf_cdc_tx.head])
         {
             buf_cdc_tx.head = new_head;
-            buf_cdc_tx.msglen[new_head] = 0;
+            buf_cdc_tx.msglen[buf_cdc_tx.head] = 0;
         }
     }
-    system_irq_disable();
-    uint32_t new_tail = (buf_cdc_tx.tail + 1UL) % BUF_CDC_TX_NUM_BUFS;
+    // Hand over the slot next to the tail to the CDC Tx FIFO when the FIFO can take the whole slot.
+    new_tail = (buf_cdc_tx.tail + 1) % BUF_CDC_TX_NUM_BUFS;
     if (new_tail != buf_cdc_tx.head)
     {
-        if (CDC_Transmit_FS((uint8_t *)buf_cdc_tx.data[new_tail], buf_cdc_tx.msglen[new_tail]) == USBD_OK)
+        if (buf_cdc_tx.msglen[new_tail] <= tud_cdc_write_available())
         {
+            tud_cdc_write(buf_cdc_tx.data[new_tail], buf_cdc_tx.msglen[new_tail]);
+            tud_cdc_write_flush();
             buf_cdc_tx.tail = new_tail;
         }
     }
-    system_irq_enable();
 
 
-    // Process can transmit buffer
-    while ((buf_can_tx.send != buf_can_tx.head || buf_can_tx.full) && (HAL_FDCAN_GetTxFifoFreeLevel(can_get_handle()) > 0))
+    // Process can transmit buffer.
+    // Guarded by BUS_OPENED: without this gate, frames still queued in
+    // buf_can_tx after a C (channel close) are pushed at the HAL with no
+    // controller available, fail, and route through gen_raise_error(
+    // SLCAN_STS_DATA_OVERRUN). The next O clears the flag so there is no
+    // host-visible misbehaviour today, but the gate makes the intent
+    // explicit and stops the spurious DATA_OVERRUN flag from being raised
+    // in the first place.
+    if (can_get_bus_state() == BUS_OPENED)
     {
-        HAL_StatusTypeDef status;
-
-        // Transmit can frame
-        status = HAL_FDCAN_AddMessageToTxFifoQ(can_get_handle(), 
-                                               &buf_can_tx.header[buf_can_tx.send], 
-                                               buf_can_tx.data[buf_can_tx.send]);
-
-        buf_can_tx.send = (buf_can_tx.send + 1) % BUF_CAN_TXQUEUE_LEN;
-
-        // This drops the packet if it fails (no retry). Failure is unlikely
-        // since we check if there is a TX mailbox free.
-        if (status != HAL_OK)
+        while ((buf_can_tx.send != buf_can_tx.head) && (HAL_FDCAN_GetTxFifoFreeLevel(can_get_handle()) > 0))
         {
-            error_assert(ERR_CAN_TXFAIL);
+            HAL_StatusTypeDef status;
+
+            // Transmit can frame
+            status = HAL_FDCAN_AddMessageToTxFifoQ(can_get_handle(),
+                                                   &buf_can_tx.header[buf_can_tx.send],
+                                                   buf_can_tx.data[buf_can_tx.send]);
+
+            // send is advanced unconditionally (drop-on-fail): advancing only on success risks
+            // an infinite loop if the frame is permanently invalid (e.g., bad DLC). Frame loss
+            // is detected as a marker mismatch and surfaced to the host via the F command.
+            buf_can_tx.send = (buf_can_tx.send + 1) % BUF_CAN_TXQUEUE_LEN;
+
+            uint16_t nbr_sent_frames;   // Number of frames in HAL waiting for being sent
+            nbr_sent_frames = (BUF_CAN_TXQUEUE_LEN + buf_can_tx.send - buf_can_tx.tail) % BUF_CAN_TXQUEUE_LEN;
+            if (BUF_MAX_NBR_SENT_FRAMES < nbr_sent_frames)
+            {
+                buf_release_can_tail();  // Assume the frame is deleted in HAL (Disabled retransmission or overflow)
+                // Do not raise error here because it should not be for disabled retransmission.
+                // Overflow can be catched by checking the error flags, which is done in can.c.
+            }
+
+            if (status != HAL_OK)
+            {
+                gen_raise_error(SLCAN_STS_DATA_OVERRUN);
+                // TODO Would it be better to try again later than dropping the frame?
+            }
         }
     }
 }
 
-// Enqueue data for transmission over USB CDC to host (copy and comit = slow)
+// Enqueue data for transmission over USB CDC to host (copy and commit = slower)
+//
+// Note on the overflow flag: CDC Tx buffer overflow is reported through
+// SLCAN_STS_CAN_RX_FIFO_FULL (F bit 0). The flag name refers to CAN Rx but the
+// same bit is shared by the CDC Tx side, as documented in doc/2.-Command-List.md.
 void buf_enqueue_cdc(uint8_t* buf, uint16_t len)
 {
-    if (BUF_CDC_TX_BUF_SIZE - len < buf_cdc_tx.msglen[buf_cdc_tx.head])
+    if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
-        
-        error_assert(ERR_FULLBUF_USBTX);    // The data does not fit in the buffer
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        return;
     }
-    else
-    {
-        // Copy data
-        memcpy((uint8_t *)&buf_cdc_tx.data[buf_cdc_tx.head][buf_cdc_tx.msglen[buf_cdc_tx.head]], buf, len);
-        buf_cdc_tx.msglen[buf_cdc_tx.head] += len;
-    }
+
+    // Copy the data
+    memcpy((uint8_t *)&buf_cdc_tx.data[buf_cdc_tx.head][buf_cdc_tx.msglen[buf_cdc_tx.head]], buf, len);
+    buf_cdc_tx.msglen[buf_cdc_tx.head] += len;
 }
 
-// Get destination pointer of cdc buffer (Start position of write access)
-uint8_t *buf_get_cdc_dest(void)
+// Get destination pointer of cdc buffer for len bytes data (Start position of write access)
+// This function combined with buf_commit_cdc_dest will provide a faster access compared to buf_enqueue_cdc.
+// Return NULL if the data does not fit in the buffer.
+// See buf_enqueue_cdc above for the CDC Tx overflow / F bit 0 mapping rationale.
+uint8_t *buf_reserve_cdc_dest(uint16_t len)
 {
-    if (BUF_CDC_TX_BUF_SIZE - SLCAN_MTU < buf_cdc_tx.msglen[buf_cdc_tx.head])
+    if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
     {
-        error_assert(ERR_FULLBUF_USBTX);        // The data will not fit in the buffer
+        // Raise error since the caller will not call commit after they fail to reserve buffer.
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
         return NULL;
     }
 
@@ -155,48 +240,79 @@ uint8_t *buf_get_cdc_dest(void)
 }
 
 // Send the data bytes in destination area over USB CDC to host
-void buf_comit_cdc_dest(uint32_t len)
+// See buf_enqueue_cdc above for the CDC Tx overflow / F bit 0 mapping rationale.
+void buf_commit_cdc_dest(uint16_t len)
 {
+    if (BUF_CDC_TX_BUF_SIZE < buf_cdc_tx.msglen[buf_cdc_tx.head] + len)
+    {
+        // The data will not fit in the buffer.
+        gen_raise_error(SLCAN_STS_CAN_RX_FIFO_FULL);  // CDC Tx overflow -> F bit 0; see doc/2
+        return;
+    }
+
     buf_cdc_tx.msglen[buf_cdc_tx.head] += len;
 }
 
-// Get destination pointer of can tx frame header
-FDCAN_TxHeaderTypeDef *buf_get_can_dest_header(void)
+// Get pointer to the frame header of the head can frame
+// Return NULL if the buffer is full.
+FDCAN_TxHeaderTypeDef *buf_get_can_head_header(void)
 {
     if (buf_can_tx.full)
     {
-        error_assert(ERR_FULLBUF_CANTX);
+        gen_raise_error(SLCAN_STS_CAN_TX_FIFO_FULL);
         return NULL;
     }
 
     return &buf_can_tx.header[buf_can_tx.head];
 }
 
-// Get destination pointer of can tx frame data bytes
-uint8_t *buf_get_can_dest_data(void)
+// Get pointer to the frame data of the head can frame
+// Return NULL if the buffer is full.
+uint8_t *buf_get_can_head_data(void)
 {
     if (buf_can_tx.full)
     {
-        error_assert(ERR_FULLBUF_CANTX);
+        gen_raise_error(SLCAN_STS_CAN_TX_FIFO_FULL);
         return NULL;
     }
 
     return buf_can_tx.data[buf_can_tx.head];
 }
 
-// Send the message in destination slot on the CAN bus.
-HAL_StatusTypeDef buf_comit_can_dest(void)
+// Get pointer to the frame data of the sent can frame with the given marker.
+// Returns NULL if no entry matches the marker (the empty-buffer case is just
+// the special case where the marker-search loop exits without iterating).
+// Does NOT raise an error: per buffer.c's reporting policy, this query is
+// neither a buffer-full condition nor a data-loss event in the buffer's
+// processing path - interpreting a NULL return is the caller's business.
+uint8_t *buf_get_can_sent_data(uint8_t marker)
+{
+    uint8_t idx = buf_can_tx.tail;
+    while (idx != buf_can_tx.send)
+    {
+        if (buf_can_tx.header[idx].MessageMarker == marker)
+        {
+            return buf_can_tx.data[idx];
+        }
+        idx = (idx + 1) % BUF_CAN_TXQUEUE_LEN;
+    }
+
+    return NULL;
+}
+
+// Send the message in head slot on the CAN bus.
+HAL_StatusTypeDef buf_commit_can_head(void)
 {
     if (can_is_tx_enabled() == ENABLE)
     {
         // If the queue is full
         if (buf_can_tx.full)
         {
-            error_assert(ERR_FULLBUF_CANTX);
+            gen_raise_error(SLCAN_STS_CAN_TX_FIFO_FULL);
             return HAL_ERROR;
         }
 
-        // Increment the head pointer
+        // Increment the head index
         buf_can_tx.head = (buf_can_tx.head + 1) % BUF_CAN_TXQUEUE_LEN;
         if (buf_can_tx.head == buf_can_tx.tail) buf_can_tx.full = 1;
     }
@@ -208,15 +324,41 @@ HAL_StatusTypeDef buf_comit_can_dest(void)
     return HAL_OK;
 }
 
-// Dequeue data bytes from the can tx buffer (Delete one frame)
-uint8_t *buf_dequeue_can_tx_data(void)
+// Delete one frame from the can tx buffer
+HAL_StatusTypeDef buf_release_can_tail(void)
 {
-    uint32_t tmp_tail = buf_can_tx.tail;
+    if ((buf_can_tx.head == buf_can_tx.tail) && !buf_can_tx.full)
+    {
+        return HAL_ERROR;
+    }
 
     buf_can_tx.tail = (buf_can_tx.tail + 1) % BUF_CAN_TXQUEUE_LEN;
     buf_can_tx.full = 0;
 
-    return buf_can_tx.data[tmp_tail];
+    return HAL_OK;
+}
+
+// Delete frames in the can tx buffer until the frame with the given marker (including the frame).
+HAL_StatusTypeDef buf_release_can_until(uint8_t marker)
+{
+    // If the buffer is empty or the frame with the marker is not found
+    if (buf_get_can_sent_data(marker) == NULL)
+    {
+        return HAL_ERROR;
+    }
+
+    while (buf_can_tx.tail != buf_can_tx.send)
+    {
+        if (buf_can_tx.header[buf_can_tx.tail].MessageMarker == marker)
+        {
+            buf_can_tx.tail = (buf_can_tx.tail + 1) % BUF_CAN_TXQUEUE_LEN;
+            break;
+        }
+        buf_can_tx.tail = (buf_can_tx.tail + 1) % BUF_CAN_TXQUEUE_LEN;
+    }
+    buf_can_tx.full = 0;
+
+    return HAL_OK;
 }
 
 // Clear can tx buffer

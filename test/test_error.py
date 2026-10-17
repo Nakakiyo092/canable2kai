@@ -186,11 +186,13 @@ class ErrorTestCase(unittest.TestCase):
 
 
     def test_cdc_rx_overflow(self):
-        """Flooding the CDC Rx buffer faster than the main loop can drain it
+        """Flood the CDC Rx buffer faster than the main loop can drain it.
+        The DEBUG-only stall command ~<HHHH>[CR] is used to guarantee the
+        overflow by blocking the main loop while the host floods.
+        Depending on the project, the device either discards data and
         raises F bit 1 (SLCAN_STS_CAN_TX_FIFO_FULL, shared by CDC Rx side
-        per doc/2). The DEBUG-only stall command ~<HHHH>[CR] is used to
-        guarantee the overflow by blocking the main loop while the host
-        floods.
+        per doc/2), or holds off the host so that every command is answered
+        and no F bit is raised.
 
         Note: The corruption-defence behaviour of the same overflow path
         is verified in test_buffer.test_message_loss_in_cdc_rx_buffer;
@@ -203,13 +205,21 @@ class ErrorTestCase(unittest.TestCase):
         self.assertEqual(self.dut.receive(), b"F00\r")
 
         # Stall 1000 ms (0x03E8) and flood `II\r` during the stall;
-        # 1500 * 3 = 4500 bytes >> ~512-byte CDC Rx ring.
+        # 1500 * 3 = 4500 bytes, larger than the CDC Rx buffer of the device.
+        # The write may block while the device holds off the host.
+        num_cmds = 1500
+        write_timeout = self.dut.ser.write_timeout
+        self.dut.ser.write_timeout = 10
         self.dut.send(b"~03E8\r")
-        self.dut.ser.write(b"II\r" * 1500)
+        self.dut.ser.write(b"II\r" * num_cmds)
+        self.dut.ser.write_timeout = write_timeout
         time.sleep(1.5)
+        rx_data = b""
         for _ in range(20):
-            if not self.dut.receive():
+            chunk = self.dut.receive()
+            if not chunk:
                 break
+            rx_data += chunk
 
         # Empty command flushes the device's pending state so F responds
         # promptly (see test_buffer.test_message_loss_in_cdc_rx_buffer).
@@ -217,11 +227,17 @@ class ErrorTestCase(unittest.TestCase):
         self.dut.receive()
 
         self.dut.send(b"F\r")
-        self.assertEqual(self.dut.receive(), b"F02\r",
-                         "Expected F02 (CDC Rx overflow, reported via bit 1) after sustained host write burst")
-        self.dut.send(b"F\r")
-        self.assertEqual(self.dut.receive(), b"F00\r",
-                         "F bits should clear after read")
+        f_reply = self.dut.receive()
+        if f_reply == b"F00\r":
+            # No overflow reported: the device held off the host, so no command may be lost.
+            self.assertEqual(rx_data.count(b"\a"), num_cmds,
+                             "No CDC Rx overflow is reported but commands are lost")
+        else:
+            self.assertEqual(f_reply, b"F02\r",
+                             "Expected F02 (CDC Rx overflow, reported via bit 1) after sustained host write burst")
+            self.dut.send(b"F\r")
+            self.assertEqual(self.dut.receive(), b"F00\r",
+                             "F bits should clear after read")
 
         self.dut.send(b"C\r")
         self.assertEqual(self.dut.receive(), b"\r")

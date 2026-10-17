@@ -1,30 +1,41 @@
-#ifndef _LED_H
-#define _LED_H
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
 
-// LED state
-enum led_state
+#ifndef USB2CANFDV1_LED_H
+#define USB2CANFDV1_LED_H
+
+#include "main.h"
+
+// LED state (active-low: LED_ON = GPIO_PIN_RESET drives pin LOW to light the LED)
+enum LedState
 {
-    LED_ON,
-    LED_OFF
+    LED_ON  = GPIO_PIN_RESET,
+    LED_OFF = GPIO_PIN_SET
 };
 
 // GPIO definitions
-#define LED_BLUE_Pin GPIO_PIN_15
-#define LED_BLUE_Port GPIOA
-#define LED_BLUE LED_BLUE_Port , LED_BLUE_Pin
-
-#define LED_GREEN_Pin GPIO_PIN_11   // Original pinout
-#define LED_GREEN_Port GPIOB        // Original pinout
-//#define LED_GREEN_Pin GPIO_PIN_0    // For Walfront
-//#define LED_GREEN_Port GPIOA        // For Walfront
-#define LED_GREEN LED_GREEN_Port , LED_GREEN_Pin
+#define LED_RXD LED_RXD_GPIO_Port , LED_RXD_Pin
+#define LED_TXD LED_TXD_GPIO_Port , LED_TXD_Pin
 
 // Prototypes
-void led_init();
-void led_turn_green(enum led_state state);
-void led_blink_sequence(uint8_t numblinks);
-void led_blink_green(void);
-void led_blink_blue(void);
+void led_init(void);
+void led_turn_txd(enum LedState state); // No led_turn_rxd: RX LED is managed exclusively via led_blink_rxd/led_process
+void led_blink_txd(void);
+void led_blink_rxd(void);
 void led_process(void);
 
-#endif
+#endif // USB2CANFDV1_LED_H

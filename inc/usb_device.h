@@ -1,14 +1,25 @@
-#ifndef __USB_DEVICE__H__
-#define __USB_DEVICE__H__
+///////////////////////////////////////////////////////////////////////////////
+// GNU General Public License v3.0
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
+// See also: LICENSE.md in the root of this repository
+///////////////////////////////////////////////////////////////////////////////
 
+// USB device initialization (tinyUSB)
 
-#include "stm32g4xx.h"
-#include "stm32g4xx_hal.h"
-#include "usbd_def.h"
+#ifndef USB_DEVICE_H
+#define USB_DEVICE_H
 
+void MX_USB_Device_Init(void);
 
-// Prototypes
-void usb_init(void);
-
-
-#endif /* __USB_DEVICE__H__ */
+#endif // USB_DEVICE_H

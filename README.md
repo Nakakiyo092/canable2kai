@@ -37,21 +37,60 @@ The toolchain in this repository is designed to run on a Linux PC especially Ubu
 
 ### Dependencies
 
-On Ubuntu, the required tools can be installed with:
+- git
+- CMake 3.25 or later
+- Ninja
+- GNU Arm Embedded Toolchain
+- dfu-util
+
+The toolchain binaries must be in your PATH. On Ubuntu, the required tools can be installed with:
 
 ```bash
-sudo apt install git gcc-arm-none-eabi dfu-util
+sudo apt install git cmake ninja-build gcc-arm-none-eabi dfu-util
 ```
 
 ### How to build firmware
 
-Simply compile by running `make`.
+The build uses CMake presets. `cmake --list-presets` shows the available boards.
+
+```bash
+cmake --preset canable2
+cmake --build --preset canable2
+```
+
+The firmware is written to `build/canable2/` (`canable2.elf`, `canable2.bin`, `canable2.hex`, `canable2.map`).
+
+The test suite under `test/` uses debug-only commands (e.g. loopback modes) and requires a debug build.
+Use the `canable2-debug` preset for it. The firmware is written to `build/canable2-debug/`, and the `V` command returns a version string with `-DEBUG`.
+
+```bash
+cmake --preset canable2-debug
+cmake --build --preset canable2-debug
+```
+
+The former Makefile has been removed. The commands map as follows:
+
+| Former command | Command |
+|----------------|---------|
+| `make`         | `cmake --preset canable2` (first time only), then `cmake --build --preset canable2` |
+| `make flash`   | `cmake --build --preset canable2 --target upload` |
+| `make clean`   | `cmake --build --preset canable2 --target clean` |
 
 ### How to flash firmware
 
-Plug in your device in boot mode. Next, type `make flash` and your device will be updated to the latest firmware. Unplug the device and replug in normal mode, and your device will be up and running.
+Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, run the command below and your CANable will be updated to the firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
 
-## Credits
+```bash
+cmake --build --preset canable2 --target upload
+```
+
+For the debug build, use the `canable2-debug` preset instead.
+
+```bash
+cmake --build --preset canable2-debug --target upload
+```
+
+On Linux, dfu-util needs permission to access the device (a udev rule, or running the command with `sudo`).
 
 ### Related work
 

@@ -12,8 +12,18 @@ Issues, discussions, pull requests, and forks may be created at the contributor�
 │   └── canable2kai.wiki    # Git subtree (external wiki repo)
 ├── test/                   # Test scripts for system test
 │   └── slcan-tester        # Git subtree (external repo)
-└── canable2kai-fw/         # Firmware source code
+├── cmake/                  # CMake toolchain and helper scripts
+├── inc/                    # Firmware headers
+├── src/                    # Firmware sources
+├── ldscripts/              # Linker scripts
+├── lib/                    # Vendored libraries (see lib/README.md)
+├── CMakeLists.txt
+└── CMakePresets.json       # Board presets (cmake --list-presets)
 ```
+
+Vendored libraries under `lib/` keep a fixed path per library (`lib/<name>/`).
+The upstream source, version, license, and local modifications are recorded in `lib/README.md`.
+To update a library, overwrite its directory in place so that the diff shows the upstream changes, and update `lib/README.md`.
 
 
 ## Subtrees (for maintainer)
@@ -84,3 +94,11 @@ git subtree push --prefix=test testtree merge
 
 - Every requirement described in the documents under `doc/` should be covered by at least one test.
 - Beyond that, branch or edge-case coverage is added at the developer's discretion — wherever there is doubt about correctness, add a test.
+
+
+## Publishing binaries (for maintainer)
+
+- Binaries are never published automatically. The CI workflow only checks that the firmware builds, and uploads no artifacts.
+- If binaries are published, a maintainer does it manually, for example by attaching them to a release.
+  Before that, confirm that every library linked into the binary has a GPL-3.0-compatible license, and that its notices are included in LICENSE.md.
+- Do not add steps that upload or publish binaries to the CI workflow.
