@@ -399,50 +399,64 @@ class BufferTestCase(unittest.TestCase):
 
 
     def test_can_tx_event_buffer(self):
-        """Verify HAL Tx Event FIFO preserves order of events during burst
-        transmission, and that overflow is reported via F08.
+        """Verify that a Tx Event FIFO overflow is reported via F08, and that
+        the events that do reach the host keep their order.
 
-        Sends frames in chunks of 30 (well above the HAL Tx Event FIFO
-        depth of 3) at S8/Y5 (1 Mbps / 5 Mbps) with z0002 (Tx event ON,
-        Rx OFF) to force event drops. Verifies that the events that DO
-        reach the host are in the correct order, and that the F command
-        reports F08 (DATA_OVERRUN). See the inline comment below for
-        why F08 specifically proves Tx Event FIFO loss here.
+        The overflow is forced with the stall command (~), so that it does
+        not depend on the host timing. The HAL Tx FIFO and the Tx Event FIFO
+        are both 3 deep, and only the main loop moves frames into the Tx FIFO
+        and events out of the Tx Event FIFO. A single stall therefore fills
+        the Tx Event FIFO but cannot overflow it. Two stalls in successive
+        main loop iterations do:
+
+          1. 8 frames (exactly 64 bytes, one CDC read) are queued, and the
+             first 3 are moved into the Tx FIFO at the end of the iteration.
+          2. The next read gets stall 1. During the stall the 3 frames are
+             sent and the Tx Event FIFO becomes full (3 events). After the
+             stall, the next 3 frames are moved into the Tx FIFO.
+          3. The next iteration reads 1 event (2 left), then stall 2, sent
+             during stall 1. During stall 2 the 3 frames are sent, but only
+             1 event fits, so 2 events are lost.
+
+        S0 (10 kbps) makes a frame take several ms, so the frames complete
+        during the stalls and not before them.
         """
         #self.dut.print_on = True
 
-        chunk = 30  # "stun" the device by sending too many frames at once
+        n_frames = 8        # 8 x 8 bytes = 64 bytes = one CDC read
+        stall = b"~0032\r"  # 50 ms, longer than 3 frames at S0
 
-        self.dut.send(b"S8\r")
-        self.assertEqual(self.dut.receive(), b"\r")
-        self.dut.send(b"Y5\r")
+        self.dut.send(b"S0\r")
         self.assertEqual(self.dut.receive(), b"\r")
         self.dut.send(b"z0002\r")  # no rx, tx event only
         self.assertEqual(self.dut.receive(), b"\r")
         self.dut.send(b"=\r")
         self.assertEqual(self.dut.receive(), b"\r")
 
-        # The cdc buffer can store as least 180 messages (4096 / 22) (Do not cause irrelevant buffer overflow)
+        tx_data = b""
         rx_data_exp = b""
-        for i in range(0, int(180 / chunk)):
-            tx_data = b""
-            for j in range(0, chunk):
-                nbr = int(i * chunk + j)
-                frame = b"t" + format(nbr, "03X").encode() + b"1" + format(nbr, "02X").encode() + b"\r"
-                tx_data += frame
-                rx_data_exp += b"z" + frame    # except ack
-            self.dut.send(tx_data)
-            # Avoid main-loop starvation (STUN).
-            # See https://github.com/Nakakiyo092/usb2canfdv1/discussions/152
-            time.sleep(0.001)
+        for nbr in range(0, n_frames):
+            frame = b"t" + format(nbr, "03X").encode() + b"1" + format(nbr, "02X").encode() + b"\r"
+            tx_data += frame
+            rx_data_exp += b"z" + frame    # except ack
+        self.assertEqual(len(tx_data), 64)
+
+        self.dut.send(tx_data + stall)  # stall 1 is in the next CDC read
+        time.sleep(0.02)                 # send stall 2 during stall 1
+        self.dut.send(stall)
+        time.sleep(0.3)                  # wait for both stalls and the remaining frames
 
         rx_data = self.dut.receive()
 
         # Check number of acks (this is not mandatory)
         rx_msgs = rx_data.split(b"\r")
-        self.assertEqual(rx_msgs.count(b""), int(180 / chunk) * chunk + 1,
-                         "Unexpected number of bare [CR] acks for the sent Tx commands (z0002 mode)")  # +1 by the last tx event
+        self.assertEqual(rx_msgs.count(b""), n_frames + 2 + 1,
+                         "Unexpected number of bare [CR] acks for the Tx and stall commands (z0002 mode)")  # +1 by the last tx event
         rx_msgs = [msg for msg in rx_msgs if msg != b""]   # remove acks
+
+        # Check some events are lost
+        self.assertLess(len(rx_msgs), n_frames,
+                        "No Tx event was lost; the stalls did not overflow the Tx Event FIFO")
 
         # Check rx frames are as expected (except frame loss)
         ex_msgs = rx_data_exp.split(b"\r")
