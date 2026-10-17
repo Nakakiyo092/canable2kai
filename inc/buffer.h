@@ -12,7 +12,7 @@
 // GNU General Public License for more details.
 //
 // Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
-// See also: LICENSE.md in the root of this repository
+// See also: LICENSE in the root of this repository
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifndef USB2CANFDV1_BUFFER_H
