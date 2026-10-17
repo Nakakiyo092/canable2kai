@@ -13,8 +13,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Checks that the firmware builds. It does not produce binaries for
-# distribution: no artifacts are uploaded, since binaries are not published.
+# Checks that the firmware builds. Binaries are never published automatically:
+# no artifacts are uploaded. Publishing is a manual step after a license review.
 jobs:
   build-check:
     name: Build check (${{ matrix.preset }})
