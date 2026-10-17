@@ -53,9 +53,6 @@ On Ubuntu, the required tools can be installed with:
 sudo apt install git cmake ninja-build gcc-arm-none-eabi dfu-util
 ```
 
-The build calls the tools from PATH. The tools installed with apt are already in PATH.
-If you install the toolchain in another way (e.g. from an archive), add its `bin` directory to PATH.
-
 ### How to build firmware
 
 The build uses CMake presets. `cmake --list-presets` shows the available boards.
