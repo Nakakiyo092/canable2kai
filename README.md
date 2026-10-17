@@ -9,9 +9,12 @@ URL to this repository: https://github.com/Nakakiyo092/canable2kai
 
 - `O[CR]` - Opens the CAN channel
 - `C[CR]` - Closes the CAN channel
-- `Sn[CR]` - Sets the nominal bit rate (n = 0-9, e.g. `S8` for 1M)
 - `sxxyy[CR]` - Sets custom nominal bit rate
-- `Yn[CR]` - Sets the CAN FD data segment bit rate (n = 0-2, 4, 5, e.g. `Y2` for 2M)
+- `Y0[CR]` - Sets the CANFD data segment bit rate to 500k
+- `Y1[CR]` - Sets the CANFD data segment bit rate to 1M
+- `Y2[CR]` - Sets the CANFD data segment bit rate to 2M
+- `Y4[CR]` - Sets the CANFD data segment bit rate to 4M
+- `Y5[CR]` - Sets the CANFD data segment bit rate to 5M
 - `tiiildd...[CR]` - Transmits base frame
 - `Tiiiiiiiildd...[CR]` - Transmits extended frame
 - `diiildd...[CR]` - Transmits CAN FD base frame (BRS disabled)
