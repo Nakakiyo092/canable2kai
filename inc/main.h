@@ -59,8 +59,10 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_RXD_Pin GPIO_PIN_15
 #define LED_RXD_GPIO_Port GPIOA
-#define LED_TXD_Pin GPIO_PIN_11
-#define LED_TXD_GPIO_Port GPIOB
+#define LED_TXD_Pin GPIO_PIN_0            // For Walfront
+#define LED_TXD_GPIO_Port GPIOA           // For Walfront
+//#define LED_TXD_Pin GPIO_PIN_11         // Original pinout
+//#define LED_TXD_GPIO_Port GPIOB         // Original pinout
 #define CAN_PWR_Pin GPIO_PIN_13
 #define CAN_PWR_GPIO_Port GPIOC
 
