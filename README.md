@@ -33,7 +33,7 @@ Please find more information in the `doc` directory or the [wiki](https://github
 
 ## Toolchain
 
-The toolchain in this repository is designed to run on a Linux PC especially Ubuntu.
+The toolchain in this repository is designed to run on a Linux PC especially Ubuntu 24.04 or later.
 
 ### Dependencies
 
