@@ -9,18 +9,15 @@ URL to this repository: https://github.com/Nakakiyo092/canable2kai
 
 - `O[CR]` - Opens the CAN channel
 - `C[CR]` - Closes the CAN channel
+- `Sn[CR]` - Sets the nominal bit rate (n = 0-9, e.g. `S8` for 1M)
 - `sxxyy[CR]` - Sets custom nominal bit rate
-- `Y0[CR]` - Sets the CANFD data segment bit rate to 500k
-- `Y1[CR]` - Sets the CANFD data segment bit rate to 1M
-- `Y2[CR]` - Sets the CANFD data segment bit rate to 2M
-- `Y4[CR]` - Sets the CANFD data segment bit rate to 4M
-- `Y5[CR]` - Sets the CANFD data segment bit rate to 5M
-- `tiiildd...[CR] `- Transmits base frame
-- `Tiiiiiiiildd...[CR] `- Transmits extended frame
-- `diiildd...[CR] `- Transmits CANFD base frame (BRS disabled)
-- `Diiiiiiiildd...[CR] `- Transmits CANFD extended frames (BRS disabled)
-- `biiildd...[CR] `- Transmits CANFD base frames (BRS enabled)
-- `Biiiiiiiildd...[CR] `- Transmits CANFD extended frames (BRS enable)
+- `Yn[CR]` - Sets the CAN FD data segment bit rate (n = 0-2, 4, 5, e.g. `Y2` for 2M)
+- `tiiildd...[CR]` - Transmits base frame
+- `Tiiiiiiiildd...[CR]` - Transmits extended frame
+- `diiildd...[CR]` - Transmits CAN FD base frame (BRS disabled)
+- `Diiiiiiiildd...[CR]` - Transmits CAN FD extended frame (BRS disabled)
+- `biiildd...[CR]` - Transmits CAN FD base frame (BRS enabled)
+- `Biiiiiiiildd...[CR]` - Transmits CAN FD extended frame (BRS enabled)
 - `V[CR]` and `v[CR]` - Returns firmware version and remote path as a string
 - `Z` and `z` - Configures reporting mechanism including time stamp and Tx event
 - `M` and `m` - Configures CAN acceptance filter
@@ -33,7 +30,7 @@ Please find more information in the `doc` directory or the [wiki](https://github
 
 ## Toolchain
 
-The toolchain in this repository is designed to run on a Linux PC especially Ubuntu 24.04 or later.
+The build environment is intended for Linux, especially Ubuntu 24.04 or later.
 
 ### Dependencies
 
@@ -78,7 +75,7 @@ The former Makefile has been removed. The commands map as follows:
 
 ### How to flash firmware
 
-Plug in your device in boot mode. Next, run the command below and your device will be updated to the firmware. Unplug/replug the device after making it back to normal mode, and your device will be up and running.
+Plug in your device in boot mode (see [Hardware](doc/5.-Hardware.md) for how to enter it). Next, run the command below and your device will be updated to the firmware. Unplug/replug the device after returning it to normal mode, and your device will be up and running.
 
 ```bash
 cmake --build --preset canable2 --target upload
