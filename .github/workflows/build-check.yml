@@ -1,4 +1,4 @@
-name: Build
+name: Build check
 
 on:
   push:
@@ -13,9 +13,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Build check only. No artifacts are uploaded, since binaries are not published.
+# Checks that the firmware builds. It does not produce binaries for
+# distribution: no artifacts are uploaded, since binaries are not published.
 jobs:
-  build:
+  build-check:
+    name: Build check (${{ matrix.preset }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
