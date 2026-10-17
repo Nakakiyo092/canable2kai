@@ -219,7 +219,10 @@ static void OptionByte_Config(void)
 
   // Unlock option bytes
   if (HAL_FLASH_OB_Unlock() != HAL_OK)
+  {
+    HAL_FLASH_Lock();
     return;
+  }
 
   FLASH_OBProgramInitTypeDef progval = {0};
 
