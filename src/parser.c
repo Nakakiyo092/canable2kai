@@ -25,7 +25,7 @@
 #include "led.h"
 #include "nvm.h"
 #include "parser.h"
-#define SLCAN_VERSION       "VL2K6"
+#define SLCAN_VERSION       "VL2K0"
 #define SLCAN_SW_VERSION    GIT_VERSION
 #define SLCAN_RET_OK    ((uint8_t*)"\r")
 #define SLCAN_RET_ERR   ((uint8_t*)"\a")
