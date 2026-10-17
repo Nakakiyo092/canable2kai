@@ -73,14 +73,6 @@ cmake --preset canable2-debug
 cmake --build --preset canable2-debug
 ```
 
-The former Makefile has been removed. The commands map as follows:
-
-| Former command | Command |
-|----------------|---------|
-| `make`         | `cmake --preset canable2` (first time only), then `cmake --build --preset canable2` |
-| `make flash`   | `cmake --build --preset canable2 --target upload` |
-| `make clean`   | `cmake --build --preset canable2 --target clean` |
-
 ### How to flash firmware
 
 Plug in your device in boot mode (see [Hardware](doc/5.-Hardware.md) for how to enter it). Next, run the command below and your device will be updated to the firmware. Unplug/replug the device after returning it to normal mode, and your device will be up and running.
