@@ -1,6 +1,7 @@
 # CANable2-Kai
 
-CAN is a network that lets the controllers inside machines, mostly vehicles, communicate with each other, for example the ones controlling the engine, brakes, airbags and dashboard.
+CAN is a network that lets the controllers inside machines communicate with each other, mostly in vehicles but also in industrial machines, robots and agricultural equipment.
+In a car, for example, these are the controllers for the engine, brakes, airbags and dashboard.
 This firmware runs on a small USB adapter that connects a PC to such a network.
 It is used to watch, record and send messages when developing, testing or diagnosing these systems.
 
