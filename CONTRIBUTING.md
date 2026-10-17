@@ -100,5 +100,5 @@ git subtree push --prefix=test testtree merge
 
 - Binaries are never published automatically. The CI workflow only checks that the firmware builds, and uploads no artifacts.
 - If binaries are published, a maintainer does it manually, for example by attaching them to a release.
-  Before that, confirm that every library linked into the binary has a GPL-3.0-compatible license, and that its notices are included in LICENSE.md.
+  Before that, confirm that every library linked into the binary has a GPL-3.0-compatible license, and that its license notices accompany the binaries.
 - Do not add steps that upload or publish binaries to the CI workflow.
