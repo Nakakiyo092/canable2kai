@@ -78,7 +78,7 @@ The former Makefile has been removed. The commands map as follows:
 
 ### How to flash firmware
 
-Plug in your CANable2 while boot pins are shorted with jumper. Neither the blue nor the green LED should be illuminated. Next, run the command below and your CANable will be updated to the firmware. Unplug/replug the device after moving the boot jumper back, and your CANable2 will be up and running.
+Plug in your device in boot mode. Next, run the command below and your device will be updated to the firmware. Unplug/replug the device after making it back to normal mode, and your device will be up and running.
 
 ```bash
 cmake --build --preset canable2 --target upload
@@ -100,5 +100,4 @@ On Linux, dfu-util needs permission to access the device (a udev rule, or runnin
 
 ### Bundled third-party components
 
-See LICENSE.md for the full list of bundled components and their licenses.
-
+See lib/README.md for the full list of bundled components and their licenses.
