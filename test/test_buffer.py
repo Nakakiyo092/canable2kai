@@ -406,27 +406,31 @@ class BufferTestCase(unittest.TestCase):
         and the Tx Event FIFO are both 3 deep, and only the main loop moves
         frames into the Tx FIFO and events out of the Tx Event FIFO (1 event
         per iteration). A single stall therefore fills the Tx Event FIFO but
-        cannot overflow it. Two stalls in different main loop iterations do:
+        cannot overflow it. Two stalls in successive iterations do:
 
           1. Many frames are queued at S0 (10 kbps, several ms per frame),
              so the Tx FIFO stays full for a while.
-          2. Stall 1 (long). During the stall the 3 frames in the Tx FIFO
-             are sent and the Tx Event FIFO becomes full (3 events). After
-             the stall, the next 3 frames are moved into the Tx FIFO.
-          3. Stall 2, sent in a separate write during stall 1. The next
-             iteration reads 1 event (2 left), then stall 2. During stall 2
-             the 3 frames are sent, but only 1 event fits, so 2 events are
-             lost.
+          2. During a stall, the 3 frames in the Tx FIFO are sent and the
+             Tx Event FIFO becomes full (3 events). After the stall, the
+             next 3 frames are moved into the Tx FIFO.
+          3. If the next stall is read in the next iteration, 1 event is
+             read before it (2 left). During the stall the 3 frames are
+             sent, but only 1 event fits, so 2 events are lost.
 
-        Each part is sent in a separate write, so the test does not depend
-        on how many bytes the device handles per iteration. The host only
-        needs to deliver the writes within the margins below (hundreds of ms).
+        Whether the next stall is read in the next iteration depends on when
+        the USB OUT endpoint is re-armed, which is roughly a coin toss. If it
+        is read later, the Tx Event FIFO is drained in between, but the stall
+        fills it again, so the next pair gets another chance. A chain of
+        stalls, each sent in a separate write during the previous one, makes
+        an overflow practically certain. The test does not depend on how many
+        bytes the device handles per iteration.
         """
         #self.dut.print_on = True
 
         n_frames = 48           # ~6 ms each at S0, so the Tx FIFO stays full for ~280 ms
-        stall_1 = b"~01F4\r"    # 500 ms
-        stall_2 = b"~0064\r"    # 100 ms, longer than 3 frames at S0
+        n_stalls = 8            # each pair overflows with a probability of about 1/2
+        stall = b"~012C\r"      # 300 ms, much longer than 3 frames at S0
+        stall_interval = 0.15   # send the next stall during the previous one
 
         self.dut.send(b"S0\r")
         self.assertEqual(self.dut.receive(), b"\r")
@@ -443,17 +447,17 @@ class BufferTestCase(unittest.TestCase):
             rx_data_exp += b"z" + frame    # except ack
 
         self.dut.send(tx_data)
-        time.sleep(0.05)    # separate stall 1 from the frames, well before the frames run out
-        self.dut.send(stall_1)
-        time.sleep(0.2)     # send stall 2 during stall 1
-        self.dut.send(stall_2)
-        time.sleep(1.0)     # wait for both stalls and the remaining frames
+        time.sleep(0.05)    # separate the stalls from the frames, well before the frames run out
+        for _ in range(0, n_stalls):
+            self.dut.send(stall)
+            time.sleep(stall_interval)
+        time.sleep(1.0)     # wait for the last stall and the remaining frames
 
         rx_data = self.dut.receive()
 
         # Check number of acks (this is not mandatory)
         rx_msgs = rx_data.split(b"\r")
-        self.assertEqual(rx_msgs.count(b""), n_frames + 2 + 1,
+        self.assertEqual(rx_msgs.count(b""), n_frames + n_stalls + 1,
                          "Unexpected number of bare [CR] acks for the Tx and stall commands (z0002 mode)")  # +1 by the last tx event
         rx_msgs = [msg for msg in rx_msgs if msg != b""]   # remove acks
 
