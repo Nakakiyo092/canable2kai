@@ -407,24 +407,30 @@ class BufferTestCase(unittest.TestCase):
         are both 3 deep, and only the main loop moves frames into the Tx FIFO
         and events out of the Tx Event FIFO. A single stall therefore fills
         the Tx Event FIFO but cannot overflow it. Two stalls in successive
-        main loop iterations do:
+        main loop iterations do.
 
-          1. 8 frames (exactly 64 bytes, one CDC read) are queued, and the
-             first 3 are moved into the Tx FIFO at the end of the iteration.
-          2. The next read gets stall 1. During the stall the 3 frames are
-             sent and the Tx Event FIFO becomes full (3 events). After the
-             stall, the next 3 frames are moved into the Tx FIFO.
-          3. The next iteration reads 1 event (2 left), then stall 2, sent
-             during stall 1. During stall 2 the 3 frames are sent, but only
-             1 event fits, so 2 events are lost.
+        The main loop handles one CDC read (up to 64 bytes) per iteration, so
+        everything is sent in one write, laid out on 64-byte boundaries:
+
+          1. 8 frames (64 bytes) are queued, and the first 3 are moved into
+             the Tx FIFO at the end of the iteration.
+          2. Stall 1, padded to 64 bytes with blank commands. During the
+             stall the 3 frames are sent and the Tx Event FIFO becomes full
+             (3 events). After the stall, the next 3 frames are moved into
+             the Tx FIFO.
+          3. The next iteration reads 1 event (2 left), then stall 2. During
+             stall 2 the 3 frames are sent, but only 1 event fits, so 2
+             events are lost.
 
         S0 (10 kbps) makes a frame take several ms, so the frames complete
         during the stalls and not before them.
         """
         #self.dut.print_on = True
 
+        cdc_read_size = 64  # bytes handled per main loop iteration
         n_frames = 8        # 8 x 8 bytes = 64 bytes = one CDC read
         stall = b"~0032\r"  # 50 ms, longer than 3 frames at S0
+        n_pad = cdc_read_size - len(stall)
 
         self.dut.send(b"S0\r")
         self.assertEqual(self.dut.receive(), b"\r")
@@ -439,19 +445,18 @@ class BufferTestCase(unittest.TestCase):
             frame = b"t" + format(nbr, "03X").encode() + b"1" + format(nbr, "02X").encode() + b"\r"
             tx_data += frame
             rx_data_exp += b"z" + frame    # except ack
-        self.assertEqual(len(tx_data), 64)
+        self.assertEqual(len(tx_data), cdc_read_size)
 
-        self.dut.send(tx_data + stall)  # stall 1 is in the next CDC read
-        time.sleep(0.02)                 # send stall 2 during stall 1
-        self.dut.send(stall)
-        time.sleep(0.3)                  # wait for both stalls and the remaining frames
+        # frames | stall 1 + blank commands | stall 2, each part in its own CDC read
+        self.dut.send(tx_data + stall + b"\r" * n_pad + stall)
+        time.sleep(0.3)     # wait for both stalls and the remaining frames
 
         rx_data = self.dut.receive()
 
         # Check number of acks (this is not mandatory)
         rx_msgs = rx_data.split(b"\r")
-        self.assertEqual(rx_msgs.count(b""), n_frames + 2 + 1,
-                         "Unexpected number of bare [CR] acks for the Tx and stall commands (z0002 mode)")  # +1 by the last tx event
+        self.assertEqual(rx_msgs.count(b""), n_frames + 2 + n_pad + 1,
+                         "Unexpected number of bare [CR] acks for the Tx, stall and blank commands (z0002 mode)")  # +1 by the last tx event
         rx_msgs = [msg for msg in rx_msgs if msg != b""]   # remove acks
 
         # Check some events are lost
