@@ -89,6 +89,9 @@ cmake --build --preset canable2-debug --target upload
 
 On Linux, dfu-util needs permission to access the device (a udev rule, or running the command with `sudo`).
 
+
+## Credits
+
 ### Related work
 
 | Name | Author | License |

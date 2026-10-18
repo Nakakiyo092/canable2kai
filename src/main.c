@@ -136,6 +136,10 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
 
+  /** Disable the internal pull-down in Dead Battery pins of UCPD peripheral
+  */
+  HAL_PWREx_DisableUCPDDeadBattery();
+
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   * PLL VCO = HSI 16 MHz / 4 * 80 = 320 MHz
@@ -188,7 +192,7 @@ void SystemClock_Config(void)
   RCC_CRSInitStruct.Polarity = RCC_CRS_SYNC_POLARITY_RISING;
   RCC_CRSInitStruct.ReloadValue = __HAL_RCC_CRS_RELOADVALUE_CALCULATE(48000000, 1000);
   RCC_CRSInitStruct.ErrorLimitValue = 34;
-  RCC_CRSInitStruct.HSI48CalibrationValue = 32;
+  RCC_CRSInitStruct.HSI48CalibrationValue = RCC_CRS_HSI48CALIBRATION_DEFAULT;
   HAL_RCCEx_CRSConfig(&RCC_CRSInitStruct);
 
   HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);

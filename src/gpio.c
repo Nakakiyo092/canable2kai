@@ -47,12 +47,10 @@ void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_RXD_GPIO_Port, LED_RXD_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(LED_TXD_GPIO_Port, LED_TXD_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(CAN_PWR_GPIO_Port, CAN_PWR_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : LED_RXD_Pin LED_TXD_Pin */
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -62,11 +60,6 @@ void MX_GPIO_Init(void)
   HAL_GPIO_Init(LED_RXD_GPIO_Port, &GPIO_InitStruct);
   GPIO_InitStruct.Pin = LED_TXD_Pin;
   HAL_GPIO_Init(LED_TXD_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : CAN_PWR_Pin (CAN transceiver power, kept on) */
-  GPIO_InitStruct.Pin = CAN_PWR_Pin;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(CAN_PWR_GPIO_Port, &GPIO_InitStruct);
 
 }
 
