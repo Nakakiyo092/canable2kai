@@ -429,7 +429,8 @@ class BufferTestCase(unittest.TestCase):
 
         n_frames = 48           # ~6 ms each at S0, so the Tx FIFO stays full for ~280 ms
         n_stalls = 8            # each pair overflows with a probability of about 1/2
-        stall = b"~012C\r"      # 300 ms, much longer than 3 frames at S0
+        stall_ms = 300          # much longer than 3 frames at S0
+        stall = b"~" + format(stall_ms, "04X").encode() + b"\r"
         stall_interval = 0.15   # send the next stall during the previous one
 
         self.dut.send(b"S0\r")
@@ -451,7 +452,8 @@ class BufferTestCase(unittest.TestCase):
         for _ in range(0, n_stalls):
             self.dut.send(stall)
             time.sleep(stall_interval)
-        time.sleep(1.0)     # wait for the last stall and the remaining frames
+        # The stalls run back to back, so wait for all of them and the remaining frames
+        time.sleep(n_stalls * (stall_ms / 1000.0 - stall_interval) + 1.0)
 
         rx_data = self.dut.receive()
 
