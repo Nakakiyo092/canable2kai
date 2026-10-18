@@ -297,47 +297,43 @@ class BufferTestCase(unittest.TestCase):
 
 
     def test_can_rx_buffer(self):
-        """Verify CAN Rx buffer preserves order of frames received in bursts.
+        """Verify that a HAL Rx FIFO overflow is reported via F08, and that
+        the frames that do reach the host keep their order.
 
-        Sends frames in chunks of 30 (well above the HAL Rx FIFO depth of
-        3) at S8/Y5 (1 Mbps / 5 Mbps) to force frame loss. Verifies that
-        the frames that DO reach the host are in the correct order, and
-        that the F command reports F08 (DATA_OVERRUN) indicating the
-        dropped frames (HAL Rx FIFO message lost).
+        The frames are looped back internally (=) at S0, and the 3-deep HAL
+        Rx FIFO is overflowed with a chain of stall commands; see
+        DeviceUnderTest.send_with_stall_chain.
         """
         #self.dut.print_on = True
 
-        chunk = 30  # "stun" the device by sending too many frames at once
+        n_frames = 48
 
-        self.dut.send(b"S8\r")
+        self.dut.send(b"S0\r")
         self.assertEqual(self.dut.receive(), b"\r")
-        self.dut.send(b"Y5\r")
+        self.dut.send(b"z0001\r")  # rx only, no tx event
         self.assertEqual(self.dut.receive(), b"\r")
         self.dut.send(b"=\r")
         self.assertEqual(self.dut.receive(), b"\r")
 
-        # The cdc buffer can store as least 180 messages (4096 / 22)
-        # Do not cause irrelevant buffer overflow
+        tx_data = b""
         rx_data_exp = b""
-        for i in range(0, int(180 / chunk)):
-            tx_data = b""
-            for j in range(0, chunk):
-                nbr = int(i * chunk + j)
-                frame = b"t" + format(nbr, "03X").encode() + b"1" + format(nbr, "02X").encode() + b"\r"
-                tx_data += frame
-                rx_data_exp += frame    # except ack
-            self.dut.send(tx_data)
-            # Avoid main-loop starvation (STUN).
-            # See https://github.com/Nakakiyo092/usb2canfdv1/discussions/152
-            time.sleep(0.001)
+        for nbr in range(0, n_frames):
+            frame = b"t" + format(nbr, "03X").encode() + b"1" + format(nbr, "02X").encode() + b"\r"
+            tx_data += frame
+            rx_data_exp += frame    # except ack
 
+        self.dut.send_with_stall_chain(tx_data)
         rx_data = self.dut.receive()
 
         # Check number of acks (this is not mandatory)
         rx_msgs = rx_data.split(b"\r")
-        self.assertEqual(rx_msgs.count(b"z"), int(180 / chunk) * chunk,
+        self.assertEqual(rx_msgs.count(b"z"), n_frames,
                          "Unexpected number of z[CR] acks for the sent Tx commands")
-        rx_msgs = [msg for msg in rx_msgs if msg != b"z"]   # remove acks
+        rx_msgs = [msg for msg in rx_msgs if msg not in (b"z", b"")]   # remove acks (z for Tx, bare for stalls)
+
+        # Check some frames are lost
+        self.assertLess(len(rx_msgs), n_frames,
+                        "No Rx frame was lost; the stalls did not overflow the Rx FIFO")
 
         # Check rx frames are as expected (except frame loss)
         ex_msgs = rx_data_exp.split(b"\r")
@@ -352,7 +348,7 @@ class BufferTestCase(unittest.TestCase):
         # Check message loss in the HAL buffer to confirm a frame stack
         self.dut.send(b"F\r")
         self.assertEqual(self.dut.receive(), b"F08\r",
-                         "Expected F08 (DATA_OVERRUN) from HAL Rx FIFO loss after burst beyond FIFO depth")
+                         "Expected F08 (DATA_OVERRUN) from HAL Rx FIFO loss")
         self.dut.send(b"C\r")
         self.assertEqual(self.dut.receive(), b"\r")
 
@@ -402,36 +398,13 @@ class BufferTestCase(unittest.TestCase):
         """Verify that a Tx Event FIFO overflow is reported via F08, and that
         the events that do reach the host keep their order.
 
-        The overflow is forced with the stall command (~). The HAL Tx FIFO
-        and the Tx Event FIFO are both 3 deep, and only the main loop moves
-        frames into the Tx FIFO and events out of the Tx Event FIFO (1 event
-        per iteration). A single stall therefore fills the Tx Event FIFO but
-        cannot overflow it. Two stalls in successive iterations do:
-
-          1. Many frames are queued at S0 (10 kbps, several ms per frame),
-             so the Tx FIFO stays full for a while.
-          2. During a stall, the 3 frames in the Tx FIFO are sent and the
-             Tx Event FIFO becomes full (3 events). After the stall, the
-             next 3 frames are moved into the Tx FIFO.
-          3. If the next stall is read in the next iteration, 1 event is
-             read before it (2 left). During the stall the 3 frames are
-             sent, but only 1 event fits, so 2 events are lost.
-
-        Whether the next stall is read in the next iteration depends on when
-        the USB OUT endpoint is re-armed, which is roughly a coin toss. If it
-        is read later, the Tx Event FIFO is drained in between, but the stall
-        fills it again, so the next pair gets another chance. A chain of
-        stalls, each sent in a separate write during the previous one, makes
-        an overflow practically certain. The test does not depend on how many
-        bytes the device handles per iteration.
+        The frames are looped back internally (=) at S0, and the 3-deep HAL
+        Tx Event FIFO is overflowed with a chain of stall commands; see
+        DeviceUnderTest.send_with_stall_chain.
         """
         #self.dut.print_on = True
 
-        n_frames = 48           # ~6 ms each at S0, so the Tx FIFO stays full for ~280 ms
-        n_stalls = 8            # each pair overflows with a probability of about 1/2
-        stall_ms = 300          # much longer than 3 frames at S0
-        stall = b"~" + format(stall_ms, "04X").encode() + b"\r"
-        stall_interval = 0.15   # send the next stall during the previous one
+        n_frames = 48
 
         self.dut.send(b"S0\r")
         self.assertEqual(self.dut.receive(), b"\r")
@@ -447,21 +420,11 @@ class BufferTestCase(unittest.TestCase):
             tx_data += frame
             rx_data_exp += b"z" + frame    # except ack
 
-        self.dut.send(tx_data)
-        time.sleep(0.05)    # separate the stalls from the frames, well before the frames run out
-        for _ in range(0, n_stalls):
-            self.dut.send(stall)
-            time.sleep(stall_interval)
-        # The stalls run back to back, so wait for all of them and the remaining frames
-        time.sleep(n_stalls * (stall_ms / 1000.0 - stall_interval) + 1.0)
-
+        self.dut.send_with_stall_chain(tx_data)
         rx_data = self.dut.receive()
 
-        # Check number of acks (this is not mandatory)
         rx_msgs = rx_data.split(b"\r")
-        self.assertEqual(rx_msgs.count(b""), n_frames + n_stalls + 1,
-                         "Unexpected number of bare [CR] acks for the Tx and stall commands (z0002 mode)")  # +1 by the last tx event
-        rx_msgs = [msg for msg in rx_msgs if msg != b""]   # remove acks
+        rx_msgs = [msg for msg in rx_msgs if msg != b""]   # remove acks (bare for Tx and stalls)
 
         # Check some events are lost
         self.assertLess(len(rx_msgs), n_frames,
@@ -478,16 +441,13 @@ class BufferTestCase(unittest.TestCase):
                          "Received Tx events are out of order (some leftovers did not match the expected sequence)")
 
         # Check F bit 3 (DATA_OVERRUN) is raised.
-        # F bit 3 has three possible sources (HAL Rx FIFO lost, HAL Tx Frame FIFO write fail,
-        # HAL Tx Event FIFO element lost), but only the last applies here:
-        #   - Rx is disabled by z0002, so no Rx FIFO loss can occur.
-        #   - Tx Frame FIFO writes are guarded by HAL_FDCAN_GetTxFifoFreeLevel() > 0,
-        #     so write failures do not occur under normal test conditions.
-        # Therefore F bit 3 here specifically proves HAL Tx Event FIFO element loss (frame stack).
+        # The looped-back frames also overflow the HAL Rx FIFO (z0002 only stops the
+        # Rx reports), which raises the same bit. The lost events checked above show
+        # the Tx Event FIFO loss.
         # See also: https://github.com/Nakakiyo092/usb2canfdv1/issues/49
         self.dut.send(b"F\r")
         self.assertEqual(self.dut.receive(), b"F08\r",
-                         "Expected F08 (DATA_OVERRUN) from HAL Tx Event FIFO loss; see comment above for why this is specific")
+                         "Expected F08 (DATA_OVERRUN) from HAL Tx Event FIFO loss")
         self.dut.send(b"C\r")
         self.assertEqual(self.dut.receive(), b"\r")
 
