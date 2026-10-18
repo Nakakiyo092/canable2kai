@@ -63,8 +63,6 @@ void Error_Handler(void);
 #define LED_TXD_GPIO_Port GPIOA           // For CANable2 clone
 //#define LED_TXD_Pin GPIO_PIN_11         // Original pinout
 //#define LED_TXD_GPIO_Port GPIOB         // Original pinout
-#define CAN_PWR_Pin GPIO_PIN_13
-#define CAN_PWR_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 
