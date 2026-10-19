@@ -9,13 +9,16 @@ from device_under_test import DeviceUnderTest
 
 
 # NOTE: All tests in this file require another device (aux) wired to the DUT
-#       on the same CAN bus, with the default firmware setup.
+#       on the same CAN bus. The tests do not access the aux, so open its
+#       channel beforehand in normal mode with the default bit rates,
+#       e.g. by sending "C", "S4", "Y2" and "O" to the aux.
 #       - TxEventTestCase: aux acts as a normal ACK provider.
-#       - EsiTestCase: aux receives but cannot ACK frames whose data phase
-#         is faster than its own configuration, allowing controlled NACKs.
+#       - EsiTestCase: aux stays at Y2, so it receives but cannot ACK frames
+#         whose data phase is faster (the DUT uses Y5), allowing controlled
+#         NACKs.
 #       - TdcTestCase: aux acts as a normal ACK provider.
-#       The test_single_tx_event_after_retries requires the channel of the
-#       aux device becoming open and closed repeatedly.
+#       The test_single_tx_event_after_retries (skipped) requires the
+#       channel of the aux device becoming open and closed repeatedly.
 class TxEventTestCase(unittest.TestCase):
 
     dut: DeviceUnderTest
