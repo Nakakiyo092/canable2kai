@@ -26,7 +26,7 @@
 #include "nvm.h"
 #include "parser.h"
 #define SLCAN_VERSION       "VL2K0"
-#define SLCAN_VERSION_DETAIL "v: hardware=\"CANable2.0\", software=\"" GIT_VERSION "\", url=\"github.com/Nakakiyo092/canable2kai\"\r"
+#define SLCAN_VERSION_DETAIL "v: hardware=\"CANable2.0\", software=\"" GIT_VERSION "\", url=\"" GIT_REMOTE "\"\r"
 #define SLCAN_RET_OK    ((uint8_t*)"\r")
 #define SLCAN_RET_ERR   ((uint8_t*)"\a")
 #define SLCAN_RET_LEN   1U
