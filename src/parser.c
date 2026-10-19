@@ -38,8 +38,6 @@ static char *hw_sw_ver = SLCAN_VERSION "\r";
 static char *hw_sw_ver = SLCAN_VERSION "-DEBUG\r";
 #endif
 static char *hw_sw_ver_detail = "v: hardware=\"CANable2.0\", software=\"" SLCAN_SW_VERSION "\", url=\"" "github.com/Nakakiyo092/canable2kai" "\"\r";
-static char *can_info = "I3050\r";
-static char *can_info_detail = "i: protocol=\"ISO-CANFD\", clock_mhz=80, controller=\"STM32G431CB\"\r";
 
 // Private methods
 static HAL_StatusTypeDef psr_convert_str_to_number(uint8_t *buf, uint8_t len);
@@ -858,10 +856,24 @@ void psr_parse_str_can_info(uint8_t *buf, uint8_t len)
         return;
     }
 
+    _Static_assert(CAN_ROOT_CLOCK_MHZ <= 0xFF, "CAN clock does not fit in the I reply");
+    _Static_assert(CAN_ROOT_CLOCK_MHZ <= 999, "CAN clock does not fit in the i reply");
+
     if (buf[0] == 'I')
-        buf_enqueue_cdc((uint8_t *)can_info, strlen(can_info));
+    {
+        // "I30XX\r" (fixed length: 6), XX = CAN clock in hex (MHz)
+        char out[6 + 1];    // + NUL written by snprintf_
+        snprintf_(out, sizeof(out), "I30%02X\r", CAN_ROOT_CLOCK_MHZ);
+        buf_enqueue_cdc((uint8_t *)out, 6);
+    }
     else if (buf[0] == 'i')
-        buf_enqueue_cdc((uint8_t *)can_info_detail, strlen(can_info_detail));
+    {
+        // "i: protocol=\"ISO-CANFD\", clock_mhz=XXX, controller=\"STM32G431CB\"\r" (fixed length: 65)
+        char out[65 + 1];   // + NUL written by snprintf_
+        snprintf_(out, sizeof(out), "i: protocol=\"ISO-CANFD\", clock_mhz=%3u, controller=\"STM32G431CB\"\r",
+                  CAN_ROOT_CLOCK_MHZ);
+        buf_enqueue_cdc((uint8_t *)out, 65);
+    }
 
     return;
 }
