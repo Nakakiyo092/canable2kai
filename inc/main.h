@@ -59,10 +59,10 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_RXD_Pin GPIO_PIN_15
 #define LED_RXD_GPIO_Port GPIOA
-#define LED_TXD_Pin GPIO_PIN_11
-#define LED_TXD_GPIO_Port GPIOB
-#define CAN_PWR_Pin GPIO_PIN_13
-#define CAN_PWR_GPIO_Port GPIOC
+#define LED_TXD_Pin GPIO_PIN_0            // For CANable2 clone
+#define LED_TXD_GPIO_Port GPIOA           // For CANable2 clone
+//#define LED_TXD_Pin GPIO_PIN_11         // Original pinout
+//#define LED_TXD_GPIO_Port GPIOB         // Original pinout
 
 /* USER CODE BEGIN Private defines */
 
