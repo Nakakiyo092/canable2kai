@@ -26,7 +26,7 @@
 #include "nvm.h"
 #include "parser.h"
 #define SLCAN_VERSION       "VL2K0"
-#define SLCAN_SW_VERSION    GIT_VERSION
+#define SLCAN_VERSION_DETAIL "v: hardware=\"CANable2.0\", software=\"" GIT_VERSION "\", url=\"github.com/Nakakiyo092/canable2kai\"\r"
 #define SLCAN_RET_OK    ((uint8_t*)"\r")
 #define SLCAN_RET_ERR   ((uint8_t*)"\a")
 #define SLCAN_RET_LEN   1U
@@ -37,7 +37,8 @@ static char *hw_sw_ver = SLCAN_VERSION "\r";
 #else
 static char *hw_sw_ver = SLCAN_VERSION "-DEBUG\r";
 #endif
-static char *hw_sw_ver_detail = "v: hardware=\"CANable2.0\", software=\"" SLCAN_SW_VERSION "\", url=\"" "github.com/Nakakiyo092/canable2kai" "\"\r";
+static char *hw_sw_ver_detail = SLCAN_VERSION_DETAIL;
+_Static_assert(sizeof(SLCAN_VERSION_DETAIL) - 1 <= SLCAN_MTU, "v reply exceeds SLCAN_MTU");
 
 // Private methods
 static HAL_StatusTypeDef psr_convert_str_to_number(uint8_t *buf, uint8_t len);
