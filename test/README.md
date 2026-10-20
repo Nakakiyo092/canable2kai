@@ -2,6 +2,7 @@
 
 Python test scripts for SLCAN device with CAN FD support.
 - https://github.com/Nakakiyo092/usb2canfdv1
+- https://github.com/Nakakiyo092/canable2kai
 - https://github.com/Nakakiyo092/canable2-fw
 
 
